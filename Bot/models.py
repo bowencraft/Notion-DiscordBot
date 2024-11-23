@@ -17,13 +17,15 @@ class Clients(Base):
     notion_db_id = Column(String, nullable=False)
     tag = Column(Boolean, default=False)
     prefix = Column(String, default=PREFIX)
+    notion_channel = Column(Integer, nullable=True)
 
-    def __init__(self, guild_id, notion_api_key, notion_db_id, tag, prefix=PREFIX):
+    def __init__(self, guild_id, notion_api_key, notion_db_id, tag, prefix=PREFIX, notion_channel=None):
         self.guild_id = guild_id
         self.notion_api_key = notion_api_key
         self.notion_db_id = notion_db_id
         self.tag = tag
         self.prefix = prefix
+        self.notion_channel = notion_channel
 
     @property
     def serialize(self):
@@ -33,4 +35,5 @@ class Clients(Base):
             "notion_db_id": self.notion_db_id,
             "tag": self.tag,
             "prefix": self.prefix,
+            "notion_channel": self.notion_channel,
         }

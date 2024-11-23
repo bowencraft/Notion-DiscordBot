@@ -92,6 +92,33 @@ async def setupConversation(ctx, bot):
     else:
         tag = False
 
+    embed = discord.Embed(description="请提及(mention)一个用于接收Notion更新通知的频道")
+    await ctx.send(embed=embed)
+    try:
+        msg = await bot.wait_for(
+            "message", check=lambda message: message.author == ctx.author, timeout=60
+        )
+    except asyncio.TimeoutError:
+        embed = discord.Embed(
+            title="Timed out",
+            description="You took too long to respond",
+            color=discord.Color.red(),
+        )
+        await ctx.send(embed=embed)
+        return
+
+    # 检查是否提及了频道
+    if len(msg.channel_mentions) == 0:
+        embed = discord.Embed(
+            title="错误",
+            description="请提及一个有效的频道（使用#提及频道）",
+            color=discord.Color.red(),
+        )
+        await ctx.send(embed=embed)
+        return
+    
+    notion_channel = msg.channel_mentions[0].id
+
     # Verify the details
     verification = await verifyDetails(notion_api_key, notion_db_id, ctx)
     if verification:
@@ -103,6 +130,7 @@ async def setupConversation(ctx, bot):
             client.notion_api_key = encrypt(notion_api_key)
             client.notion_db_id = encrypt(notion_db_id)
             client.tag = tag
+            client.notion_channel = notion_channel
             db.commit()
             embed = discord.Embed(
                 title="Updated",
@@ -117,6 +145,7 @@ async def setupConversation(ctx, bot):
                 notion_api_key=notion_api_key,
                 notion_db_id=notion_db_id,
                 tag=tag,
+                notion_channel=notion_channel
             )
             return obj
 
@@ -126,6 +155,7 @@ async def setupConversation(ctx, bot):
             notion_api_key=encrypt(notion_api_key),
             notion_db_id=encrypt(notion_db_id),
             tag=tag,
+            notion_channel=notion_channel
         )
 
         obj = models.Clients(
@@ -133,6 +163,7 @@ async def setupConversation(ctx, bot):
             notion_api_key=notion_api_key,
             notion_db_id=notion_db_id,
             tag=tag,
+            notion_channel=notion_channel
         )
         db.add(new_client)
         db.commit()

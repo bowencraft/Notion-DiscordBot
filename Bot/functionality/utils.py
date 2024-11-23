@@ -5,6 +5,7 @@ import models
 import json
 import validators
 from functionality.security import *
+import aiohttp
 db = SessionLocal()
 
 
@@ -267,3 +268,33 @@ def getFileTags(args):
         return final_tag
     else:
         return [{"name": "misc"}]
+
+def queryNotion(notion_api_key, database_id, query_data):
+    """
+    查询 Notion 数据库
+    """
+    url = f"https://api.notion.com/v1/databases/{database_id}/query"
+    headers = {
+        'Authorization': notion_api_key,
+        'Notion-Version': '2021-08-16',
+        'Content-Type': 'application/json'
+    }
+    
+    try:
+        print(f"正在查询Notion数据库: {database_id}")
+        print(f"查询条件: {json.dumps(query_data, indent=2)}")
+        
+        payload = json.dumps(query_data)
+        response = requests.post(url, headers=headers, data=payload)
+        
+        print(f"Notion API响应状态码: {response.status_code}")
+        if response.status_code == 200:
+            result = response.json()
+            print(f"找到 {len(result.get('results', []))} 条更新")
+            return result
+        else:
+            print(f"Notion API错误响应: {response.text}")
+            return {"results": []}
+    except Exception as e:
+        print(f"查询 Notion 时出错: {e}")
+        return {"results": []}

@@ -38,14 +38,20 @@ class Help(commands.Cog):
                         f"```{prefix}delete <Tag1> <Tag2>....<TagN>```": "To delete record having tag 1,2...N. Will give list of records. Type in the serial number of the record you want to delete",
                         f"```{prefix}deleteTitle <Title>```": "To delete record having the title. Will give list of records. Type in the serial number of the record you want to delete",
                         f"```{prefix}upload <Tag 1> <Tag2>...<TagN>```": "Drag and drop the file and use this command in the comment section. It will upload it on the notion database with Tag 1,2.....N.",
-                        f"```{prefix}prefix```": "Change the prefix of the bot"}
+                        f"```{prefix}prefix```": "Change the prefix of the bot",
+                        f"```{prefix}notion_monitor```": "立即检查Notion更新",
+                        f"```{prefix}set_notion_channel #频道```": "设置Notion更新通知的目标频道",
+                        f"```{prefix}monitor_config```": "查看或修改通知显示设置"}
         else:
             # no tags enabled
             commands = {f"```{prefix}add <URL>```": "Add URL to database",
                         f"```{prefix}search <Title>```": "List of records with Title",
                         f"```{prefix}delete <Title>```": "To delete record having title. Will give list of records. Type in the serial number of the record you want to delete",
                         f"```{prefix}upload```": "Drag and drop the file and use this command in the comment section. It will upload it on the notion database with Title",
-                        f"```{prefix}prefix```": "Change the prefix of the bot"}
+                        f"```{prefix}prefix```": "Change the prefix of the bot",
+                        f"```{prefix}notion_monitor```": "立即检查Notion更新",
+                        f"```{prefix}set_notion_channel #频道```": "设置Notion更新通知的目标频道",
+                        f"```{prefix}monitor_config```": "查看或修改通知显示设置"}
 
 
         embed = discord.Embed(title="List of commands:", description="These are the commands to use with this bot", color=discord.Color.green())
