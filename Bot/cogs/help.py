@@ -46,9 +46,7 @@ class Help(commands.Cog):
                 f"```{prefix}monitor_stop (或 mstop)```": "停止当前频道的监控",
                 f"```{prefix}notion_monitor (或 nm)```": "立即执行一次更新检查",
                 f"```{prefix}monitor_config (或 mc)```": "查看当前监控配置",
-                f"```{prefix}mc interval <分钟>```": "设置检查间隔时间",
-                f"```{prefix}mc columns <列名1,列名2,...>```": "设置要显示的数据库列",
-                f"```{prefix}mc color <颜色名称>```": "设置消息卡片颜色"
+                f"```{prefix}mc interval <分钟>```": "设置检查间隔时间"
             }
         else:
             # no tags enabled
@@ -64,9 +62,7 @@ class Help(commands.Cog):
                 f"```{prefix}monitor_stop (或 mstop)```": "停止当前频道的监控",
                 f"```{prefix}notion_monitor (或 nm)```": "立即执行一次更新检查",
                 f"```{prefix}monitor_config (或 mc)```": "查看当前监控配置",
-                f"```{prefix}mc interval <分钟>```": "设置检查间隔时间",
-                f"```{prefix}mc columns <列名1,列名2,...>```": "设置要显示的数据库列",
-                f"```{prefix}mc color <颜色名称>```": "设置消息卡片颜色"
+                f"```{prefix}mc interval <分钟>```": "设置检查间隔时间"
             }
 
         embed = discord.Embed(

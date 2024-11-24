@@ -89,63 +89,24 @@ class NotionMonitor(commands.Cog):
             await ctx.send(embed=embed)
             return
 
-        setting = setting.lower()
-        valid_settings = {
-            'interval': '设置检查间隔（分钟）',
-            'columns': '设置要显示的列（用逗号分隔）',
-            'color': '设置消息颜色（例如：blue, red, green）'
-        }
-        
-        if setting not in valid_settings:
-            await ctx.send("无效的设置选项。可用选项:\n" + 
-                         "\n".join([f"`{k}`: {v}" for k, v in valid_settings.items()]))
+        if setting.lower() != 'interval':
+            await ctx.send("无效的设置选项。只支持设置 interval（检查间隔）")
             return
 
         if value is None:
-            await ctx.send(f"请提供 {setting} 的值")
+            await ctx.send("请提供间隔时间（分钟）")
             return
 
         try:
-            if setting == 'interval':
-                interval = int(value)
-                if interval < 1:
-                    await ctx.send("间隔时间必须大于0分钟")
-                    return
-                monitor.interval = interval
-                await ctx.send(f"已将检查间隔设置为 {interval} 分钟")
-
-            elif setting == 'columns':
-                # 获取数据库结构
-                db_structure = await self.get_database_structure(ctx.guild.id, monitor.database_id)
-                if not db_structure:
-                    await ctx.send("无法获取数据库结构")
-                    return
-
-                # 验证列名
-                columns = [col.strip() for col in value.split(',')]
-                invalid_columns = [col for col in columns if col not in db_structure]
-                if invalid_columns:
-                    await ctx.send(f"以下列名无效: {', '.join(invalid_columns)}\n"
-                                 f"可用的列: {', '.join(db_structure)}")
-                    return
-
-                monitor.display_columns = json.dumps(columns)
-                await ctx.send(f"已更新显示列: {', '.join(columns)}")
-
-            elif setting == 'color':
-                try:
-                    # 验证颜色是否有效
-                    color = getattr(discord.Color, value.lower())()
-                    monitor.embed_color = value.lower()
-                    await ctx.send(f"已将消息颜色设置为 {value}")
-                except AttributeError:
-                    await ctx.send(f"无效的颜色名称。可用的颜色: {', '.join(dir(discord.Color))}")
-                    return
-
+            interval = int(value)
+            if interval < 1:
+                await ctx.send("间隔时间必须大于0分钟")
+                return
+            monitor.interval = interval
             self.db.commit()
-
-        except ValueError as e:
-            await ctx.send(f"设置值无效: {str(e)}")
+            await ctx.send(f"已将检查间隔设置为 {interval} 分钟")
+        except ValueError:
+            await ctx.send("请输入有效的数字")
         except Exception as e:
             await ctx.send(f"设置失败: {str(e)}")
 
@@ -206,6 +167,124 @@ class NotionMonitor(commands.Cog):
             print(f"解析时间字符串失败: {e}")
             return datetime.utcnow()
 
+    def compare_page_changes(self, old_content, new_content):
+        """比较页面变化"""
+        changes = []
+        try:
+            old_props = json.loads(old_content)["properties"]
+            new_props = new_content["properties"]
+            
+            for prop_name in new_props:
+                if prop_name not in old_props:
+                    # 新增的属性
+                    new_value = self.format_property_value(new_props[prop_name])
+                    if new_value:
+                        changes.append(f"新增 {prop_name}: {new_value}")
+                else:
+                    # 比较现有属性
+                    old_value = self.format_property_value(old_props[prop_name])
+                    new_value = self.format_property_value(new_props[prop_name])
+                    if old_value != new_value:
+                        changes.append(f"修改 {prop_name}: {old_value} → {new_value}")
+            
+            for prop_name in old_props:
+                if prop_name not in new_props:
+                    # 删除的属性
+                    old_value = self.format_property_value(old_props[prop_name])
+                    if old_value:
+                        changes.append(f"删除 {prop_name}: {old_value}")
+                        
+        except Exception as e:
+            print(f"比较页面变化时出错: {e}")
+            
+        return changes
+
+    def format_page_message(self, page, selected_columns=None, changes=None):
+        """将Notion页面格式化为Discord消息"""
+        try:
+            embed = discord.Embed(
+                title="📝 Notion更新通知",
+                color=discord.Color.blue(),
+                timestamp=datetime.utcnow()
+            )
+            
+            # 处理选定的列
+            if selected_columns:
+                for column in selected_columns:
+                    if column in page["properties"]:
+                        value = self.format_property_value(page["properties"][column])
+                        if value:
+                            embed.add_field(name=column, value=value, inline=True)
+            else:
+                # 使用默认格式
+                return self.format_default_message(page, embed)
+            
+            # 添加页面链接
+            url = page.get("url", "")
+            if url:
+                embed.url = url
+            
+            # 添加变更信息
+            if changes:
+                change_text = "\n".join(changes)
+                embed.add_field(
+                    name="📋 变更详情",
+                    value=change_text if len(change_text) <= 1024 else change_text[:1021] + "...",
+                    inline=False
+                )
+            elif not changes and page.get("is_new", False):
+                embed.add_field(
+                    name="📋 状态",
+                    value="✨ 新增条目",
+                    inline=False
+                )
+                
+            return embed
+            
+        except Exception as e:
+            print(f"格式化页面消息时出错: {e}")
+            print(f"页面数据: {json.dumps(page, indent=2)}")
+            return None
+
+    async def process_page_updates(self, monitor, pages):
+        """处理页面更新"""
+        updates = []
+        for page in pages:
+            try:
+                # 查找页面的上一个快照
+                snapshot = self.db.query(models.NotionPageSnapshot).filter_by(
+                    monitor_id=monitor.id,
+                    page_id=page["id"]
+                ).first()
+                
+                if snapshot:
+                    # 现有页面更新
+                    changes = self.compare_page_changes(snapshot.content, page)
+                    if changes:
+                        # 更新快照
+                        snapshot.content = json.dumps(page)
+                        snapshot.last_updated = datetime.utcnow().isoformat() + "Z"
+                        updates.append((page, changes))
+                else:
+                    # 新页面
+                    page["is_new"] = True
+                    # 创建新快照
+                    new_snapshot = models.NotionPageSnapshot(
+                        monitor_id=monitor.id,
+                        page_id=page["id"],
+                        content=json.dumps(page),
+                        last_updated=datetime.utcnow().isoformat() + "Z"
+                    )
+                    self.db.add(new_snapshot)
+                    updates.append((page, None))
+                    
+                self.db.commit()
+                
+            except Exception as e:
+                print(f"处理页面 {page.get('id')} 更新时出错: {e}")
+                
+        return updates
+
     @tasks.loop(minutes=1)
     async def check_notion_updates(self):
         """检查所有活动的监控配置"""
@@ -213,31 +292,35 @@ class NotionMonitor(commands.Cog):
         
         for monitor in monitors:
             try:
-                # 检查是否到达检查间隔
                 if monitor.last_checked:
                     last_check = self.parse_iso_datetime(monitor.last_checked)
                     if (datetime.utcnow() - last_check).total_seconds() < monitor.interval * 60:
                         continue
 
-                # 获取更新
                 guild_info = self.bot.guild_info[str(monitor.guild_id)]
                 pages = self.get_notion_pages(guild_info, monitor)
+                
                 if pages:
                     channel = self.bot.get_channel(monitor.channel_id)
                     if channel:
-                        for page in pages:
-                            message = self.format_page_message(page, json.loads(monitor.display_columns))
+                        # 处理更新并获取变更信息
+                        updates = await self.process_page_updates(monitor, pages)
+                        for page, changes in updates:
+                            message = self.format_page_message(
+                                page,
+                                json.loads(monitor.display_columns),
+                                changes
+                            )
                             if message:
                                 await channel.send(embed=message)
 
-                # 更新检查时间
-                monitor.last_checked = datetime.utcnow().isoformat() + 'Z'
+                monitor.last_checked = datetime.utcnow().isoformat() + "Z"
                 self.db.commit()
 
             except Exception as e:
                 print(f"检查监控 {monitor.id} 时出错: {e}")
                 import traceback
-                traceback.print_exc()  # 打印完整的错误堆栈
+                traceback.print_exc()
 
     @check_notion_updates.before_loop
     async def before_check(self):
@@ -283,47 +366,8 @@ class NotionMonitor(commands.Cog):
             print(f"从Notion获取页面时出错: {e}")
             return []
 
-    def format_page_message(self, page, selected_columns=None):
-        """将Notion页面格式化为Discord消息"""
-        try:
-            # 解析时间戳
-            last_edited_time = page.get("last_edited_time", "")
-            if last_edited_time:
-                timestamp = self.parse_iso_datetime(last_edited_time)
-            else:
-                timestamp = datetime.utcnow()
-
-            embed = discord.Embed(
-                title="📝 Notion更新通知",
-                color=self.format_config['embed_color'],
-                timestamp=timestamp
-            )
-            
-            # 如果没有指定列，使用默认格式
-            if not selected_columns:
-                return self.format_default_message(page, embed)
-            
-            # 处理选定的列
-            for column in selected_columns:
-                if column in page["properties"]:
-                    value = self.format_property_value(page["properties"][column])
-                    if value:
-                        embed.add_field(name=column, value=value, inline=True)
-            
-            # 添加页面链接
-            url = page.get("url", "")
-            if url:
-                embed.url = url
-                
-            return embed
-            
-        except Exception as e:
-            print(f"格式化页面消息时出错: {e}")
-            print(f"页面数据: {json.dumps(page, indent=2)}")
-            return None
-
     def format_property_value(self, property_data):
-        """格式化Notion��性值"""
+        """格式化Notion属性值"""
         try:
             property_type = property_data.get("type")
             if not property_type:
@@ -346,13 +390,43 @@ class NotionMonitor(commands.Cog):
             elif property_type == "date":
                 date_data = property_data.get("date")
                 if date_data:
-                    return date_data.get("start")
+                    start = date_data.get("start", "")
+                    end = date_data.get("end", "")
+                    if end:
+                        return f"{start} 至 {end}"
+                    return start
                     
+            elif property_type == "people":
+                people = property_data.get("people", [])
+                return ", ".join([person.get("name", "未知") for person in people])
+                
+            elif property_type == "files":
+                files = property_data.get("files", [])
+                return ", ".join([
+                    f"[{file.get('name', '文件')}]({file.get('file', {}).get('url', '')})"
+                    for file in files
+                ])
+                
+            elif property_type == "checkbox":
+                return "✅" if property_data.get("checkbox") else "❌"
+                
             elif property_type == "number":
-                return str(property_data.get("number"))
+                return str(property_data.get("number", ""))
                 
             elif property_type == "url":
-                return property_data.get("url")
+                url = property_data.get("url", "")
+                return f"[链接]({url})" if url else ""
+                
+            elif property_type == "email":
+                return property_data.get("email", "")
+                
+            elif property_type == "phone_number":
+                return property_data.get("phone_number", "")
+                
+            elif property_type == "formula":
+                formula = property_data.get("formula", {})
+                return str(formula.get("string") or formula.get("number") or 
+                         formula.get("boolean") or formula.get("date"))
                 
             return str(property_data.get(property_type, ""))
             
@@ -436,26 +510,50 @@ class NotionMonitor(commands.Cog):
                 check=lambda m: m.author == ctx.author and m.channel == ctx.channel,
                 timeout=60
             )
-            interval = int(msg.content.strip())
+            
+            try:
+                interval = int(msg.content.strip())
+                if interval < 1:
+                    await ctx.send("间隔时间必须大于0分钟")
+                    return
+            except ValueError:
+                await ctx.send("请输入有效的数字")
+                return
 
             # 显示可用的列
-            columns = [f"{i+1}. {col}" for i, col in enumerate(db_structure)]
+            db_columns = list(db_structure.keys())
+            columns_display = [f"{i+1}. {col} ({db_structure[col]})" for i, col in enumerate(db_columns)]
             embed = discord.Embed(
                 title="可用的数据库列",
-                description="\n".join(columns) + "\n\n请输入要显示的列的编号（用逗号分隔）"
+                description="\n".join(columns_display) + "\n\n请输入要显示的列的编号（用逗号分隔）",
+                color=discord.Color.blue()
             )
             await ctx.send(embed=embed)
+            
             msg = await self.bot.wait_for(
                 "message",
                 check=lambda m: m.author == ctx.author and m.channel == ctx.channel,
                 timeout=60
             )
             
-            selected_columns = []
-            for num in msg.content.strip().split(","):
-                idx = int(num.strip()) - 1
-                if 0 <= idx < len(db_structure):
-                    selected_columns.append(db_structure[idx])
+            try:
+                selected_columns = []
+                for num in msg.content.strip().split(","):
+                    try:
+                        idx = int(num.strip()) - 1
+                        if 0 <= idx < len(db_columns):
+                            selected_columns.append(db_columns[idx])
+                        else:
+                            await ctx.send(f"编号 {num} 超出范围，已忽略")
+                    except ValueError:
+                        await ctx.send(f"���效的编号 '{num}'，已忽略")
+                
+                if not selected_columns:
+                    await ctx.send("未选择任何有效的列，请重新设置")
+                    return
+            except Exception as e:
+                await ctx.send(f"处理列选择时出错: {str(e)}")
+                return
 
             # 保存配置
             if monitor:
@@ -482,7 +580,11 @@ class NotionMonitor(commands.Cog):
 
             embed = discord.Embed(
                 title="监控设置完成",
-                description=f"已设置监控:\n频道: {ctx.channel.mention}\n数据库: {database_id}\n间隔: {interval}分钟\n显示列: {', '.join(selected_columns)}",
+                description=f"已设置监控:\n"
+                           f"频道: {ctx.channel.mention}\n"
+                           f"数据库: {database_id}\n"
+                           f"间隔: {interval}分钟\n"
+                           f"显示列: {', '.join(selected_columns)}",
                 color=discord.Color.green()
             )
             await ctx.send(embed=embed)
@@ -490,6 +592,9 @@ class NotionMonitor(commands.Cog):
         except asyncio.TimeoutError:
             await ctx.send("设置超时，请重新开始")
         except Exception as e:
+            print(f"设置监控时出错: {str(e)}")  # 添加详细的错误日志
+            import traceback
+            traceback.print_exc()  # 打印完整的错误堆栈
             await ctx.send(f"设置失败: {str(e)}")
 
     async def get_database_structure(self, guild_id, database_id):
@@ -506,7 +611,10 @@ class NotionMonitor(commands.Cog):
                 async with session.get(url, headers=headers) as response:
                     if response.status == 200:
                         data = await response.json()
-                        return list(data['properties'].keys())
+                        return {
+                            name: prop['type'] 
+                            for name, prop in data['properties'].items()
+                        }
         except Exception as e:
             print(f"获取数据库结构失败: {e}")
             return None
@@ -585,7 +693,7 @@ class NotionMonitor(commands.Cog):
                             inline=True
                         )
                         
-                        embed.set_footer(text="Bot by Your Name")
+                        # embed.set_footer(text="Bot by Your Name")
                         
                         await channel.send(embed=embed)
                         

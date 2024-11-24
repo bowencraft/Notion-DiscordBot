@@ -59,3 +59,17 @@ class NotionMonitorConfig(Base):
         self.is_active = is_active
         self.last_checked = None
         self.embed_color = 'blue'
+
+class NotionPageSnapshot(Base):
+    __tablename__ = 'notion_page_snapshots'
+    id = Column(Integer, primary_key=True, index=True)
+    monitor_id = Column(Integer, nullable=False)  # 关联到NotionMonitorConfig的id
+    page_id = Column(String, nullable=False)  # Notion页面ID
+    content = Column(String, nullable=False)  # JSON格式存储页面内容
+    last_updated = Column(String, nullable=False)  # 最后更新时间
+
+    def __init__(self, monitor_id, page_id, content, last_updated):
+        self.monitor_id = monitor_id
+        self.page_id = page_id
+        self.content = content
+        self.last_updated = last_updated
