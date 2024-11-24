@@ -16,6 +16,7 @@ class NotionMonitor(commands.Cog):
         self.db = SessionLocal()
         self.last_checked = {}  # 用于存储每个公会的最后检查时间
         self.check_notion_updates.start()
+        self.send_startup_notification.start()  # 添加启动通知任务
 
         print("Initialized")
         
@@ -30,6 +31,7 @@ class NotionMonitor(commands.Cog):
 
     def cog_unload(self):
         self.check_notion_updates.cancel()
+        self.send_startup_notification.cancel()  # 取消启动通知任务
 
     @commands.command(name="notion_monitor", aliases=["nm"])
     @commands.has_permissions(administrator=True)
@@ -65,34 +67,87 @@ class NotionMonitor(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def configure_monitor(self, ctx, setting: str = None, value: str = None):
         """配置监控的显示设置"""
+        monitor = self.db.query(models.NotionMonitorConfig).filter_by(
+            guild_id=ctx.guild.id,
+            channel_id=ctx.channel.id
+        ).first()
+        
+        if not monitor:
+            await ctx.send("此频道未设置监控，请先使用 monitor_setup 命令设置")
+            return
+
         if setting is None:
             # 显示当前配置
             embed = discord.Embed(
                 title="当前监控配置",
-                description="使用 `monitor_config <设置> <值>` 来修改配置",
+                description=f"数据库ID: {monitor.database_id}\n"
+                           f"检查间隔: {monitor.interval}分钟\n"
+                           f"显示列: {monitor.display_columns}\n"
+                           f"状态: {'活跃' if monitor.is_active else '停止'}",
                 color=discord.Color.blue()
             )
-            for key, value in self.format_config.items():
-                embed.add_field(name=key, value=str(value), inline=False)
             await ctx.send(embed=embed)
             return
-            
+
         setting = setting.lower()
-        if setting not in self.format_config:
-            await ctx.send("无效的设置选项。可用选项: " + ", ".join(self.format_config.keys()))
+        valid_settings = {
+            'interval': '设置检查间隔（分钟）',
+            'columns': '设置要显示的列（用逗号分隔）',
+            'color': '设置消息颜色（例如：blue, red, green）'
+        }
+        
+        if setting not in valid_settings:
+            await ctx.send("无效的设置选项。可用选项:\n" + 
+                         "\n".join([f"`{k}`: {v}" for k, v in valid_settings.items()]))
             return
-            
-        if setting in ['show_contributor', 'show_tags', 'show_url', 'show_edit_time']:
-            value = value.lower() == 'true'
-        elif setting == 'embed_color':
-            try:
-                value = getattr(discord.Color, value)()
-            except:
-                await ctx.send("无效的颜色值。请使用 discord.Color 支持的颜色名称。")
-                return
-                
-        self.format_config[setting] = value
-        await ctx.send(f"已更新设置 {setting} = {value}")
+
+        if value is None:
+            await ctx.send(f"请提供 {setting} 的值")
+            return
+
+        try:
+            if setting == 'interval':
+                interval = int(value)
+                if interval < 1:
+                    await ctx.send("间隔时间必须大于0分钟")
+                    return
+                monitor.interval = interval
+                await ctx.send(f"已将检查间隔设置为 {interval} 分钟")
+
+            elif setting == 'columns':
+                # 获取数据库结构
+                db_structure = await self.get_database_structure(ctx.guild.id, monitor.database_id)
+                if not db_structure:
+                    await ctx.send("无法获取数据库结构")
+                    return
+
+                # 验证列名
+                columns = [col.strip() for col in value.split(',')]
+                invalid_columns = [col for col in columns if col not in db_structure]
+                if invalid_columns:
+                    await ctx.send(f"以下列名无效: {', '.join(invalid_columns)}\n"
+                                 f"可用的列: {', '.join(db_structure)}")
+                    return
+
+                monitor.display_columns = json.dumps(columns)
+                await ctx.send(f"已更新显示列: {', '.join(columns)}")
+
+            elif setting == 'color':
+                try:
+                    # 验证颜色是否有效
+                    color = getattr(discord.Color, value.lower())()
+                    monitor.embed_color = value.lower()
+                    await ctx.send(f"已将消息颜色设置为 {value}")
+                except AttributeError:
+                    await ctx.send(f"无效的颜色名称。可用的颜色: {', '.join(dir(discord.Color))}")
+                    return
+
+            self.db.commit()
+
+        except ValueError as e:
+            await ctx.send(f"设置值无效: {str(e)}")
+        except Exception as e:
+            await ctx.send(f"设置失败: {str(e)}")
 
     @commands.command(name="set_notion_channel", aliases=["snc"])
     @commands.has_permissions(administrator=True)
@@ -166,7 +221,7 @@ class NotionMonitor(commands.Cog):
 
                 # 获取更新
                 guild_info = self.bot.guild_info[str(monitor.guild_id)]
-                pages = self.get_notion_pages(guild_info, monitor.last_checked)
+                pages = self.get_notion_pages(guild_info, monitor)
                 if pages:
                     channel = self.bot.get_channel(monitor.channel_id)
                     if channel:
@@ -188,12 +243,12 @@ class NotionMonitor(commands.Cog):
     async def before_check(self):
         await self.bot.wait_until_ready()
 
-    def get_notion_pages(self, guild_info, last_checked):
+    def get_notion_pages(self, guild_info, monitor):
         """获取自上次检查以来更新的Notion页面"""
         try:
-            print(f"上次检查时间: {last_checked}")
+            print(f"上次检查时间: {monitor.last_checked}")
             
-            url = "https://api.notion.com/v1/databases/" + guild_info.notion_db_id + "/query"
+            url = "https://api.notion.com/v1/databases/" + monitor.database_id + "/query"
             headers = {
                 'Authorization': guild_info.notion_api_key,
                 'Notion-Version': '2021-08-16',
@@ -202,18 +257,14 @@ class NotionMonitor(commands.Cog):
             
             query_data = {
                 "filter": {
-                    "and": [
-                        {
-                            "timestamp": "last_edited_time",
-                            "last_edited_time": {
-                                "after": last_checked
-                            }
-                        }
-                    ]
+                    "timestamp": "last_edited_time",
+                    "last_edited_time": {
+                        "after": monitor.last_checked
+                    }
                 }
             }
             
-            print(f"正在查询Notion数据库: {guild_info.notion_db_id}")
+            print(f"正在查询Notion数据库: {monitor.database_id}")
             print(f"查询条件: {json.dumps(query_data, indent=2)}")
             
             payload = json.dumps(query_data)
@@ -272,7 +323,7 @@ class NotionMonitor(commands.Cog):
             return None
 
     def format_property_value(self, property_data):
-        """格式化Notion属性值"""
+        """格式化Notion��性值"""
         try:
             property_type = property_data.get("type")
             if not property_type:
@@ -339,7 +390,7 @@ class NotionMonitor(commands.Cog):
             # 添加编辑时间
             if self.format_config['show_edit_time']:
                 edit_time = page.get("last_edited_time", "未知").split("T")[0]
-                embed.add_field(name="⏰ 更新时间", value=edit_time, inline=True)
+                embed.add_field(name="⏰ 更新间", value=edit_time, inline=True)
             
             return embed
             
@@ -358,6 +409,9 @@ class NotionMonitor(commands.Cog):
                 channel_id=ctx.channel.id
             ).first()
 
+            # 获取guild_info
+            guild_info = self.bot.guild_info[str(ctx.guild.id)]
+
             # 获取数据库ID
             embed = discord.Embed(description="请输入要监控的Notion数据库ID")
             await ctx.send(embed=embed)
@@ -368,6 +422,12 @@ class NotionMonitor(commands.Cog):
             )
             database_id = msg.content.strip()
 
+            # 验证数据库ID
+            db_structure = await self.get_database_structure(ctx.guild.id, database_id)
+            if not db_structure:
+                await ctx.send("无法获取数据库结构，请检查数据库ID是否正确")
+                return
+
             # 获取监控间隔
             embed = discord.Embed(description="请输入监控间隔（分钟，建议不小于2分钟）")
             await ctx.send(embed=embed)
@@ -377,12 +437,6 @@ class NotionMonitor(commands.Cog):
                 timeout=60
             )
             interval = int(msg.content.strip())
-
-            # 获取数据库结构
-            db_structure = await self.get_database_structure(ctx.guild.id, database_id)
-            if not db_structure:
-                await ctx.send("无法获取数据库结构，请检查数据库ID是否正确")
-                return
 
             # 显示可用的列
             columns = [f"{i+1}. {col}" for i, col in enumerate(db_structure)]
@@ -405,12 +459,14 @@ class NotionMonitor(commands.Cog):
 
             # 保存配置
             if monitor:
+                # 更新现有配置
                 monitor.database_id = database_id
                 monitor.interval = interval
                 monitor.display_columns = json.dumps(selected_columns)
                 monitor.is_active = True
-                monitor.last_checked = datetime.utcnow().isoformat() + "Z"  # 添加初始检查时间
+                monitor.last_checked = datetime.utcnow().isoformat() + "Z"
             else:
+                # 创建新配置
                 monitor = models.NotionMonitorConfig(
                     guild_id=ctx.guild.id,
                     channel_id=ctx.channel.id,
@@ -419,14 +475,14 @@ class NotionMonitor(commands.Cog):
                     display_columns=json.dumps(selected_columns),
                     is_active=True
                 )
-                monitor.last_checked = datetime.utcnow().isoformat() + "Z"  # 添加初始检查时间
+                monitor.last_checked = datetime.utcnow().isoformat() + "Z"
                 self.db.add(monitor)
             
             self.db.commit()
 
             embed = discord.Embed(
                 title="监控设置完成",
-                description=f"已设置监控:\n数据库: {database_id}\n间隔: {interval}分钟\n显示列: {', '.join(selected_columns)}",
+                description=f"已设置监控:\n频道: {ctx.channel.mention}\n数据库: {database_id}\n间隔: {interval}分钟\n显示列: {', '.join(selected_columns)}",
                 color=discord.Color.green()
             )
             await ctx.send(embed=embed)
@@ -434,7 +490,7 @@ class NotionMonitor(commands.Cog):
         except asyncio.TimeoutError:
             await ctx.send("设置超时，请重新开始")
         except Exception as e:
-            await ctx.send(f"��置失败: {str(e)}")
+            await ctx.send(f"设置失败: {str(e)}")
 
     async def get_database_structure(self, guild_id, database_id):
         """获取数据库的列结构"""
@@ -489,6 +545,60 @@ class NotionMonitor(commands.Cog):
         monitor.is_active = False
         self.db.commit()
         await ctx.send("监控已停止")
+
+    @tasks.loop(count=1)  # 只执行一次
+    async def send_startup_notification(self):
+        """发送机器人启动通知"""
+        try:
+            # 获取所有活动的监控配置
+            monitors = self.db.query(models.NotionMonitorConfig).filter_by(is_active=True).all()
+            
+            for monitor in monitors:
+                try:
+                    channel = self.bot.get_channel(monitor.channel_id)
+                    if channel:
+                        # 解析显示列
+                        display_columns = json.loads(monitor.display_columns)
+                        
+                        embed = discord.Embed(
+                            title="🤖 Notion监控已启动",
+                            description="机器人已成功启动，正在监控以下内容：",
+                            color=discord.Color.green(),
+                            timestamp=datetime.utcnow()
+                        )
+                        
+                        embed.add_field(
+                            name="📊 数据库",
+                            value=f"`{monitor.database_id}`",
+                            inline=False
+                        )
+                        
+                        embed.add_field(
+                            name="⏱️ 检查间隔",
+                            value=f"每 {monitor.interval} 分钟",
+                            inline=True
+                        )
+                        
+                        embed.add_field(
+                            name="📋 监控列",
+                            value=", ".join(display_columns) if display_columns else "无",
+                            inline=True
+                        )
+                        
+                        embed.set_footer(text="Bot by Your Name")
+                        
+                        await channel.send(embed=embed)
+                        
+                except Exception as e:
+                    print(f"发送启动通知到频道 {monitor.channel_id} 时出错: {e}")
+                    
+        except Exception as e:
+            print(f"发送启动通知时出错: {e}")
+
+    @send_startup_notification.before_loop
+    async def before_startup_notification(self):
+        """等待机器人准备就绪"""
+        await self.bot.wait_until_ready()
 
 def setup(bot):
     bot.add_cog(NotionMonitor(bot)) 

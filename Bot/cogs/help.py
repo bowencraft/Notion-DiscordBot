@@ -40,17 +40,15 @@ class Help(commands.Cog):
                 f"```{prefix}deleteTitle <Title>```": "按标题删除记录",
                 f"```{prefix}upload <Tag 1> <Tag2>...<TagN>```": "上传文件到Notion数据库并设置标签",
                 f"```{prefix}prefix```": "更改机器人的命令前缀",
-                # 添加新的监控相关命令
-                f"```{prefix}monitor_setup (或 ms)```": "设置Notion数据库监控，包括选择数据库、监控间隔和显示列",
-                f"```{prefix}monitor_start (或 mstart)```": "启动当前频道的Notion监控",
-                f"```{prefix}monitor_stop (或 mstop)```": "停止当前频道的Notion监控",
-                f"```{prefix}notion_monitor (或 nm)```": "立即执行一次Notion更新检查",
-                f"```{prefix}monitor_config (或 mc)```": "查看或修改监控显示设置",
-                f"```{prefix}mc show_contributor true/false```": "显示/隐藏贡献者信息",
-                f"```{prefix}mc show_tags true/false```": "显示/隐藏标签信息",
-                f"```{prefix}mc show_url true/false```": "显示/隐藏URL链接",
-                f"```{prefix}mc show_edit_time true/false```": "显示/隐藏编辑时间",
-                f"```{prefix}mc embed_color <颜色>```": "设置消息卡片颜色"
+                # 更新监控相关命令的说明
+                f"```{prefix}monitor_setup (或 ms)```": "设置新的Notion数据库监控",
+                f"```{prefix}monitor_start (或 mstart)```": "启动当前频道的监控",
+                f"```{prefix}monitor_stop (或 mstop)```": "停止当前频道的监控",
+                f"```{prefix}notion_monitor (或 nm)```": "立即执行一次更新检查",
+                f"```{prefix}monitor_config (或 mc)```": "查看当前监控配置",
+                f"```{prefix}mc interval <分钟>```": "设置检查间隔时间",
+                f"```{prefix}mc columns <列名1,列名2,...>```": "设置要显示的数据库列",
+                f"```{prefix}mc color <颜色名称>```": "设置消息卡片颜色"
             }
         else:
             # no tags enabled
@@ -60,17 +58,15 @@ class Help(commands.Cog):
                 f"```{prefix}delete <Title>```": "按标题删除记录",
                 f"```{prefix}upload```": "上传文件到Notion数据库",
                 f"```{prefix}prefix```": "更改机器人的命令前缀",
-                # 添加新的监控相关命令
-                f"```{prefix}monitor_setup (或 ms)```": "设置Notion数据库监控，包括选择数据库、监控间隔和显示列",
-                f"```{prefix}monitor_start (或 mstart)```": "启动当前频道的Notion监控",
-                f"```{prefix}monitor_stop (或 mstop)```": "停止当前频道的Notion监控",
-                f"```{prefix}notion_monitor (或 nm)```": "立即执行一次Notion更新检查",
-                f"```{prefix}monitor_config (或 mc)```": "查看或修改监控显示设置",
-                f"```{prefix}mc show_contributor true/false```": "显示/隐藏贡献者信息",
-                f"```{prefix}mc show_tags true/false```": "显示/隐藏标签信息",
-                f"```{prefix}mc show_url true/false```": "显示/隐藏URL链接",
-                f"```{prefix}mc show_edit_time true/false```": "显示/隐藏编辑时间",
-                f"```{prefix}mc embed_color <颜色>```": "设置消息卡片颜色"
+                # 更新监控相关命令的说明
+                f"```{prefix}monitor_setup (或 ms)```": "设置新的Notion数据库监控",
+                f"```{prefix}monitor_start (或 mstart)```": "启动当前频道的监控",
+                f"```{prefix}monitor_stop (或 mstop)```": "停止当前频道的监控",
+                f"```{prefix}notion_monitor (或 nm)```": "立即执行一次更新检查",
+                f"```{prefix}monitor_config (或 mc)```": "查看当前监控配置",
+                f"```{prefix}mc interval <分钟>```": "设置检查间隔时间",
+                f"```{prefix}mc columns <列名1,列名2,...>```": "设置要显示的数据库列",
+                f"```{prefix}mc color <颜色名称>```": "设置消息卡片颜色"
             }
 
         embed = discord.Embed(

@@ -48,6 +48,7 @@ class NotionMonitorConfig(Base):
     display_columns = Column(String, nullable=False)  # JSON格式存储要显示的列
     is_active = Column(Boolean, default=False)
     last_checked = Column(String, nullable=True)
+    embed_color = Column(String, default='blue')  # 添加颜色设置
 
     def __init__(self, guild_id, channel_id, database_id, interval=2, display_columns="[]", is_active=False):
         self.guild_id = guild_id
@@ -57,3 +58,4 @@ class NotionMonitorConfig(Base):
         self.display_columns = display_columns
         self.is_active = is_active
         self.last_checked = None
+        self.embed_color = 'blue'
