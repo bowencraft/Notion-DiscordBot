@@ -9,6 +9,7 @@ from functionality.security import getKey
 import requests
 import json
 import aiohttp
+from settings.logging_config import log, get_random_footer
 
 class NotionMonitor(commands.Cog):
     def __init__(self, bot):
@@ -18,7 +19,7 @@ class NotionMonitor(commands.Cog):
         self.check_notion_updates.start()
         self.send_startup_notification.start()  # 添加启动通知任务
 
-        print("Initialized")
+        log("Notion监控已初始化", "info")
         
         # 添加自定义格式化配置
         self.format_config = {
@@ -32,6 +33,7 @@ class NotionMonitor(commands.Cog):
     def cog_unload(self):
         self.check_notion_updates.cancel()
         self.send_startup_notification.cancel()  # 取消启动通知任务
+        log("Notion监控已停止", "info")
 
     @commands.command(name="notion_monitor", aliases=["nm"])
     @commands.has_permissions(administrator=True)
@@ -218,7 +220,7 @@ class NotionMonitor(commands.Cog):
             
             for prop_name in old_props:
                 if prop_name not in new_props:
-                    # 删除的属性
+                    # 删除的性
                     old_value = await self.format_property_value(old_props[prop_name], guild_id)
                     if old_value:
                         changes.append(f"**删 {prop_name}**: {old_value}")
@@ -231,44 +233,21 @@ class NotionMonitor(commands.Cog):
     async def format_page_message(self, page, selected_columns=None, changes=None, guild_id=None):
         """将Notion页面格式化为Discord消息"""
         try:
-            # 打印完整的页面数据到后台
-            print("\n=== Notion页面数据 ===")
-            print(f"页面ID: {page.get('id')}")
-            print(f"最后编辑时间: {page.get('last_edited_time')}")
-            print("属性:")
-            for prop_name, prop_data in page.get("properties", {}).items():
-                print(f"  {prop_name}: {json.dumps(prop_data, ensure_ascii=False, indent=2)}")
-            print("====================\n")
-
-            # 获取颜色
-            embed_color = discord.Color.blue()  # 默认颜色
-            for prop_name, prop_data in page.get("properties", {}).items():
-                if prop_data.get("type") in ["select", "multi_select"]:
-                    # 对于select直接获取颜色
-                    if prop_data.get("type") == "select" and prop_data.get("select"):
-                        color = prop_data["select"].get("color")
-                        if color:
-                            embed_color = self.notion_color_to_discord(color)
-                            break
-                    # 对于multi_select，使用第一个选项的颜色
-                    elif prop_data.get("type") == "multi_select" and prop_data.get("multi_select"):
-                        if prop_data["multi_select"] and prop_data["multi_select"][0].get("color"):
-                            color = prop_data["multi_select"][0]["color"]
-                            embed_color = self.notion_color_to_discord(color)
-                            break
-
+            # 在debug模式下记录原始数据
+            log(f"处理页面原始数据:\n{json.dumps(page, indent=2, ensure_ascii=False)}", "debug")
+            
             # 获取标题
             if page.get("is_new", False):
-                base_title = "📝 Notion 新工单"
+                base_title = "📝 Notion 新条目"
             else:
-                base_title = "📝 Notion 工单更新"
+                base_title = "📝 Notion 更新通知"
 
             title = base_title
             if guild_id:
                 monitor = self.db.query(models.NotionMonitorConfig).filter_by(
-                    guild_id=guild_id,
-                    channel_id=self.channel_id
+                    guild_id=guild_id
                 ).first()
+                
                 if monitor and monitor.title_column:
                     if monitor.title_column in page["properties"]:
                         custom_title = await self.format_property_value(
@@ -277,6 +256,30 @@ class NotionMonitor(commands.Cog):
                         )
                         if custom_title:
                             title = f"{base_title}：{custom_title}"
+                            log(f"设置自定义标题: {title}", "debug")
+
+            # 获取颜色
+            embed_color = discord.Color.blue()
+            for prop_name, prop_data in page.get("properties", {}).items():
+                if prop_data.get("type") in ["select", "multi_select", "status"]:
+                    if prop_data.get("type") == "status" and prop_data.get("status"):
+                        color = prop_data["status"].get("color")
+                        if color:
+                            embed_color = self.notion_color_to_discord(color)
+                            log(f"使用状态颜色: {color}", "debug")
+                            break
+                    elif prop_data.get("type") == "select" and prop_data.get("select"):
+                        color = prop_data["select"].get("color")
+                        if color:
+                            embed_color = self.notion_color_to_discord(color)
+                            log(f"使用选择颜色: {color}", "debug")
+                            break
+                    elif prop_data.get("type") == "multi_select" and prop_data.get("multi_select"):
+                        if prop_data["multi_select"] and prop_data["multi_select"][0].get("color"):
+                            color = prop_data["multi_select"][0]["color"]
+                            embed_color = self.notion_color_to_discord(color)
+                            log(f"使用多选颜色: {color}", "debug")
+                            break
 
             embed = discord.Embed(
                 title=title,
@@ -284,25 +287,26 @@ class NotionMonitor(commands.Cog):
                 timestamp=datetime.utcnow()
             )
             
-            # 处理选定的列
+            # 处理选定���列
             if selected_columns:
+                log(f"处理选定列: {selected_columns}", "debug")
                 for column in selected_columns:
                     if column in page["properties"]:
                         value = await self.format_property_value(page["properties"][column], guild_id)
                         if value:
                             embed.add_field(name=column, value=value, inline=True)
-            else:
-                # 使默认格式
-                return self.format_default_message(page, embed)
+                            log(f"添加字段 {column}: {value}", "debug")
             
             # 添加页面链接
             url = page.get("url", "")
             if url:
                 embed.url = url
+                log(f"添加页面链接: {url}", "debug")
             
             # 添加变更信息
             if changes:
                 change_text = "\n".join(changes)
+                log(f"变更详情:\n{change_text}", "debug")
                 embed.add_field(
                     name="📋 变更详情",
                     value=change_text if len(change_text) <= 1024 else change_text[:1021] + "...",
@@ -314,12 +318,27 @@ class NotionMonitor(commands.Cog):
                     value="✨ 新增条目",
                     inline=False
                 )
+                log("新增条目", "debug")
+
+            # 添加随机footer
+            footer_text = get_random_footer()
+            if footer_text:
+                embed.set_footer(text=footer_text)
+                log(f"添加footer: {footer_text}", "debug")
+            
+            # 在debug模式下记录最终的消息内容
+            log("最终消息内容:", "debug")
+            log(f"标题: {embed.title}", "debug")
+            log(f"颜色: {embed.color}", "debug")
+            log("字段:", "debug")
+            for field in embed.fields:
+                log(f"  {field.name}: {field.value}", "debug")
                 
             return embed
             
         except Exception as e:
-            print(f"格式化页面消息时出错: {e}")
-            print(f"页面数据: {json.dumps(page, indent=2)}")
+            log(f"格式化页面消息时出错: {e}", "info")
+            log(f"页面数据: {json.dumps(page, indent=2, ensure_ascii=False)}", "debug")
             return None
 
     async def process_page_updates(self, monitor, pages):
@@ -337,7 +356,7 @@ class NotionMonitor(commands.Cog):
                     # 现有页面更新
                     changes = await self.compare_page_changes(snapshot.content, page, monitor.guild_id)
                     if changes:
-                        # 更新快照
+                        # 新快照
                         snapshot.content = json.dumps(page)
                         snapshot.last_updated = datetime.utcnow().isoformat() + "Z"
                         updates.append((page, changes))
@@ -373,12 +392,13 @@ class NotionMonitor(commands.Cog):
                     if (datetime.utcnow() - last_check).total_seconds() < monitor.interval * 60:
                         continue
 
+                log(f"开始检查频道 {monitor.channel_id} 的更新", "info")
                 pages = self.get_notion_pages(monitor)
                 
                 if pages:
+                    log(f"找到 {len(pages)} 个更新", "debug")
                     channel = self.bot.get_channel(monitor.channel_id)
                     if channel:
-                        # 处理更新并获取变更信息
                         updates = await self.process_page_updates(monitor, pages)
                         for page, changes in updates:
                             message = await self.format_page_message(
@@ -392,11 +412,13 @@ class NotionMonitor(commands.Cog):
 
                 monitor.last_checked = datetime.utcnow().isoformat() + "Z"
                 self.db.commit()
+                log(f"完成频道 {monitor.channel_id} 的更新检查", "info")
 
             except Exception as e:
-                print(f"检查监控 {monitor.id} 时出错: {e}")
-                import traceback
-                traceback.print_exc()
+                log(f"检查监控 {monitor.id} 时出错: {e}", "info")
+                if should_log("debug"):
+                    import traceback
+                    traceback.print_exc()
 
     @check_notion_updates.before_loop
     async def before_check(self):
@@ -405,7 +427,7 @@ class NotionMonitor(commands.Cog):
     def get_notion_pages(self, monitor):
         """获取自上次检查以来更新的Notion页面"""
         try:
-            print(f"上次检查时间: {monitor.last_checked}")
+            log(f"上次检查时间: {monitor.last_checked}", "debug")
             
             url = "https://api.notion.com/v1/databases/" + monitor.database_id + "/query"
             headers = {
@@ -423,23 +445,23 @@ class NotionMonitor(commands.Cog):
                 }
             }
             
-            print(f"正在查询Notion数据库: {monitor.database_id}")
-            print(f"查询条件: {json.dumps(query_data, indent=2)}")
+            log(f"正在查询Notion数据库: {monitor.database_id}", "debug")
+            log(f"查询条件: {json.dumps(query_data, indent=2)}", "debug")
             
             payload = json.dumps(query_data)
             response = requests.post(url, headers=headers, data=payload)
             
-            print(f"Notion API响应状态码: {response.status_code}")
+            log(f"Notion API响应状态码: {response.status_code}", "debug")
             if response.status_code == 200:
                 result = response.json()
-                print(f"找到 {len(result.get('results', []))} 条更新")
+                log(f"找到 {len(result.get('results', []))} 条更新", "debug")
                 return result.get("results", [])
             else:
-                print(f"Notion API错误响应: {response.text}")
+                log(f"Notion API错误响应: {response.text}", "info")
                 return []
                 
         except Exception as e:
-            print(f"从Notion获取页面时出错: {e}")
+            log(f"从Notion获取页面时出错: {e}", "info")
             return []
 
     async def get_related_pages(self, monitor, page_ids):
@@ -794,24 +816,61 @@ class NotionMonitor(commands.Cog):
             await ctx.send(f"设置失败: {str(e)}")
 
     async def get_database_structure_with_key(self, notion_api_key, database_id):
-        """使用指定的API密钥获取数据库结构"""
+        """获取数据库的列结构"""
         url = f"https://api.notion.com/v1/databases/{database_id}"
         headers = {
             'Authorization': notion_api_key,
             'Notion-Version': '2021-08-16'
         }
         
+        log(f"正在获取数据库结构: {database_id}", "debug")
+        log(f"API URL: {url}", "debug")
+        
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, headers=headers) as response:
+                    log(f"API响应状态码: {response.status}", "debug")
+                    
                     if response.status == 200:
                         data = await response.json()
-                        return {
-                            name: prop['type'] 
-                            for name, prop in data['properties'].items()
-                        }
+                        log(f"获取到原始数据库结构:\n{json.dumps(data, indent=2, ensure_ascii=False)}", "debug")
+                        
+                        # 处理每个属性，包括relation类型
+                        properties = {}
+                        for name, prop in data['properties'].items():
+                            prop_type = prop['type']
+                            log(f"处理属性 {name} (类型: {prop_type})", "debug")
+                            
+                            if prop_type == 'relation':
+                                # 获取关联数据库的信息
+                                relation_info = prop.get('relation', {})
+                                if isinstance(relation_info, dict):
+                                    db_id = relation_info.get('database_id')
+                                    if db_id:
+                                        properties[name] = f"relation (Database: {db_id})"
+                                else:
+                                    # 如果是数组类型的relation
+                                    properties[name] = "relation (Multiple)"
+                                log(f"处理relation属性 {name}: {properties[name]}", "debug")
+                            elif prop_type == 'rollup':
+                                # 处理rollup类型
+                                properties[name] = "rollup"
+                                log(f"处理rollup属性 {name}", "debug")
+                            else:
+                                properties[name] = prop_type
+                                log(f"处理普通属性 {name}: {prop_type}", "debug")
+                        
+                        log(f"处理后的数据库结构:\n{json.dumps(properties, indent=2, ensure_ascii=False)}", "debug")
+                        return properties
+                    else:
+                        error_text = await response.text()
+                        log(f"获取数据库结构失败: HTTP {response.status}", "info")
+                        log(f"错误响应: {error_text}", "debug")
+                        return None
         except Exception as e:
-            print(f"获取数据库结构失败: {e}")
+            log(f"获取数据库结构时发生错误: {str(e)}", "info")
+            import traceback
+            log(f"错误堆栈:\n{traceback.format_exc()}", "debug")
             return None
 
     @commands.command(name="monitor_start", aliases=["mstart"])
@@ -970,7 +1029,7 @@ class NotionMonitor(commands.Cog):
                 if mapping:
                     self.db.delete(mapping)
                     self.db.commit()
-                    await ctx.send(f"✅ 已删除用户ID `{notion_id}` 的映射")
+                    await ctx.send(f"✅ 已删除户ID `{notion_id}` 的射")
                 else:
                     await ctx.send(f"❌ 未找到用户ID `{notion_id}` 的映射")
                 return
@@ -1103,7 +1162,7 @@ class NotionMonitor(commands.Cog):
                     print(f"获取页面失败: {response.text}")
                     break
             
-            print(f"初始快照创建完成，共处理 {total_pages} 个页面")
+            print(f"初始快照创建完��，共处理 {total_pages} 个页面")
             
         except Exception as e:
             print(f"创建初始快照时出错: {e}")

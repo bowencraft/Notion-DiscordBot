@@ -1,0 +1,15 @@
+# 日志设置
+logging:
+  level: info  # 可选值: none, info, debug
+
+# 机器人设置
+bot:
+  prefix: "*"  # 默认前缀 
+
+# 消息设置
+messages:
+  footers:
+    - "GAPD小助手提醒你：享福时间到 ✨"
+    - "该休息了，博士 🤝"
+    - "保持专注，持续前进 🎯"
+    - "Spiritfarer Clone"
