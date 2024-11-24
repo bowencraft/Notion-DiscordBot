@@ -179,20 +179,20 @@ class NotionMonitor(commands.Cog):
                     # 新增的属性
                     new_value = await self.format_property_value(new_props[prop_name], guild_id)
                     if new_value:
-                        changes.append(f"新增 {prop_name}: {new_value}")
+                        changes.append(f"**新增 {prop_name}**: {new_value}")
                 else:
                     # 比较现有属性
                     old_value = await self.format_property_value(old_props[prop_name], guild_id)
                     new_value = await self.format_property_value(new_props[prop_name], guild_id)
                     if old_value != new_value:
-                        changes.append(f"修改 {prop_name}: {old_value} → {new_value}")
+                        changes.append(f"**修改 {prop_name}**: {old_value} → {new_value}")
             
             for prop_name in old_props:
                 if prop_name not in new_props:
                     # 删除的属性
                     old_value = await self.format_property_value(old_props[prop_name], guild_id)
                     if old_value:
-                        changes.append(f"删除 {prop_name}: {old_value}")
+                        changes.append(f"**删除 {prop_name}**: {old_value}")
                         
         except Exception as e:
             print(f"比较页面变化时出错: {e}")
@@ -434,7 +434,23 @@ class NotionMonitor(commands.Cog):
             if not property_type:
                 return None
                 
-            if property_type == "title":
+            if property_type == "select":
+                select_data = property_data.get("select")
+                if select_data:
+                    return select_data.get("name", "")
+                return None
+            
+            elif property_type == "status":
+                select_data = property_data.get("status")
+                if select_data:
+                    return select_data.get("name", "")
+                return None
+                
+            elif property_type == "multi_select":
+                multi_select = property_data.get("multi_select", [])
+                return ", ".join([item.get("name", "") for item in multi_select])
+                
+            elif property_type == "title":
                 text_list = property_data.get("title", [])
                 formatted_texts = []
                 
@@ -484,15 +500,6 @@ class NotionMonitor(commands.Cog):
                 
                 return " ".join(formatted_texts) if formatted_texts else None
                     
-            elif property_type == "select":
-                select_data = property_data.get("select")
-                if select_data:
-                    return select_data.get("name", "")
-                    
-            elif property_type == "multi_select":
-                multi_select = property_data.get("multi_select", [])
-                return ", ".join([item.get("name", "") for item in multi_select])
-                
             elif property_type == "date":
                 date_data = property_data.get("date")
                 if date_data:
@@ -608,7 +615,7 @@ class NotionMonitor(commands.Cog):
             # 添加编辑时间
             if self.format_config['show_edit_time']:
                 edit_time = page.get("last_edited_time", "未知").split("T")[0]
-                embed.add_field(name="⏰ 更新间", value=edit_time, inline=True)
+                embed.add_field(name="⏰ 更新时间", value=edit_time, inline=True)
             
             return embed
             
@@ -674,7 +681,7 @@ class NotionMonitor(commands.Cog):
             columns_display = [f"{i+1}. {col} ({db_structure[col]})" for i, col in enumerate(db_columns)]
             embed = discord.Embed(
                 title="可用的数据库列",
-                description="\n".join(columns_display) + "\n\n请输入要显示的列的编号（用逗号分隔）",
+                description="\n".join(columns_display) + "\n\n请输入要显示的列的编号（用逗号隔开）",
                 color=discord.Color.blue()
             )
             await ctx.send(embed=embed)
@@ -851,17 +858,36 @@ class NotionMonitor(commands.Cog):
     async def map_users(self, ctx, notion_id: str = None):
         """映射Notion用户ID到Discord用户"""
         try:
-            if not notion_id or not ctx.message.mentions:
+            # 检查频道是否已设置
+            monitor = self.db.query(models.NotionMonitorConfig).filter_by(
+                guild_id=ctx.guild.id,
+                channel_id=ctx.channel.id
+            ).first()
+            
+            if not monitor:
+                embed = discord.Embed(
+                    description=f"请先运行 `{PREFIX}setup` 设置此频道",
+                    color=discord.Color.red()
+                )
+                await ctx.send(embed=embed)
+                return
+
+            # 如果没有参数或参数是"list"，显示当前映射
+            if not notion_id or notion_id.lower() == "list":
                 embed = discord.Embed(
                     title="用户映射",
-                    description="请使用以下格式：\n"
+                    description="当前频道的用户映射关系\n"
+                               "使用以下格式添加映射：\n"
                                "`*mu <Notion用户ID> @Discord用户`\n"
+                               "使用以下格式删除映射：\n"
+                               "`*mu <Notion用户ID>`\n"
                                "Notion用户ID是形如'e79a0b74-3aba-4149-9f74-0bb5791a6ee6'的UUID",
                     color=discord.Color.blue()
                 )
                 # 显示当前映射
                 all_mappings = self.db.query(models.NotionDiscordUserMap).filter_by(
-                    guild_id=ctx.guild.id
+                    guild_id=ctx.guild.id,
+                    channel_id=ctx.channel.id
                 ).all()
                 if all_mappings:
                     mapping_text = []
@@ -882,12 +908,30 @@ class NotionMonitor(commands.Cog):
                 await ctx.send("❌ 无效的Notion用户ID格式")
                 return
 
+            # 如果没有提及用户，则删除映射
+            if not ctx.message.mentions:
+                # 删除映射
+                mapping = self.db.query(models.NotionDiscordUserMap).filter_by(
+                    guild_id=ctx.guild.id,
+                    channel_id=ctx.channel.id,
+                    notion_user_id=notion_id
+                ).first()
+                
+                if mapping:
+                    self.db.delete(mapping)
+                    self.db.commit()
+                    await ctx.send(f"✅ 已删除用户ID `{notion_id}` 的映射")
+                else:
+                    await ctx.send(f"❌ 未找到用户ID `{notion_id}` 的映射")
+                return
+
             discord_user = ctx.message.mentions[0]
             discord_mention = discord_user.mention
             
             # 保存映射
             existing = self.db.query(models.NotionDiscordUserMap).filter_by(
                 guild_id=ctx.guild.id,
+                channel_id=ctx.channel.id,
                 notion_user_id=notion_id
             ).first()
 
@@ -897,6 +941,7 @@ class NotionMonitor(commands.Cog):
             else:
                 new_mapping = models.NotionDiscordUserMap(
                     guild_id=ctx.guild.id,
+                    channel_id=ctx.channel.id,
                     notion_user_id=notion_id,
                     discord_mention=discord_mention
                 )
@@ -908,6 +953,8 @@ class NotionMonitor(commands.Cog):
 
         except Exception as e:
             print(f"映射用户时出错: {e}")
+            import traceback
+            traceback.print_exc()  # 添加详细的错误跟踪
             await ctx.send(f"❌ 设置失败: {str(e)}")
 
     def format_user_value(self, users_data, guild_id):

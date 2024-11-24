@@ -50,10 +50,12 @@ class NotionDiscordUserMap(Base):
     __tablename__ = 'notion_discord_user_maps'
     id = Column(Integer, primary_key=True, index=True)
     guild_id = Column(Integer, nullable=False)
-    notion_user_id = Column(String, nullable=False)  # Notion用户ID
-    discord_mention = Column(String, nullable=False)  # Discord用户的mention字符串
+    channel_id = Column(Integer, nullable=False)
+    notion_user_id = Column(String, nullable=False)
+    discord_mention = Column(String, nullable=False)
 
-    def __init__(self, guild_id, notion_user_id, discord_mention):
+    def __init__(self, guild_id, channel_id, notion_user_id, discord_mention):
         self.guild_id = guild_id
+        self.channel_id = channel_id
         self.notion_user_id = notion_user_id
         self.discord_mention = discord_mention
