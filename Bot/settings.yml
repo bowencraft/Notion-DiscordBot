@@ -1,10 +1,11 @@
 # 日志设置
 logging:
-  level: info  # 可选值: none, info, debug
+  level: debug  # 可选值: none, info, debug
 
 # 机器人设置
 bot:
   prefix: "*"  # 默认前缀 
+  startup_notification: true  # 是否在启动时发送通知
 
 # 消息设置
 messages:
@@ -13,3 +14,4 @@ messages:
     - "该休息了，博士 🤝"
     - "保持专注，持续前进 🎯"
     - "Spiritfarer Clone"
+  startup: "🤖 机器人已启动并开始监控\n使用 `*help` 查看可用命令"  # 启动消息模板

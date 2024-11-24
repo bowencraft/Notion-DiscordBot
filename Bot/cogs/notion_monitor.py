@@ -9,15 +9,15 @@ from functionality.security import getKey
 import requests
 import json
 import aiohttp
-from settings.logging_config import log, get_random_footer
+from settings.logging_config import log, get_random_footer, config
 
 class NotionMonitor(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.db = SessionLocal()
-        self.last_checked = {}  # 用于存储每个公会的最后检查时间
+        self.last_checked = {}
         self.check_notion_updates.start()
-        self.send_startup_notification.start()  # 添加启动通知任务
+        self.send_startup_notification.start()
 
         log("Notion监控已初始化", "info")
         
@@ -287,7 +287,7 @@ class NotionMonitor(commands.Cog):
                 timestamp=datetime.utcnow()
             )
             
-            # 处理选定���列
+            # 处理选定列
             if selected_columns:
                 log(f"处理选定列: {selected_columns}", "debug")
                 for column in selected_columns:
@@ -887,7 +887,7 @@ class NotionMonitor(commands.Cog):
             return
             
         monitor.is_active = True
-        monitor.last_checked = datetime.utcnow().isoformat() + "Z"  # 添加初始检查时间
+        monitor.last_checked = datetime.utcnow().isoformat() + "Z"  # 添��初始检查时间
         self.db.commit()
         await ctx.send("监控已启动")
 
@@ -912,50 +912,88 @@ class NotionMonitor(commands.Cog):
     async def send_startup_notification(self):
         """发送机器人启动通知"""
         try:
-            # 获取所有活动的监控配置
-            monitors = self.db.query(models.NotionMonitorConfig).filter_by(is_active=True).all()
+            # 检查是否启用了启动通知
+            if not config.get('bot', {}).get('startup_notification', False):
+                log("启动通知已禁用", "info")
+                return
+
+            # 获取启动消息模板
+            startup_message = config.get('messages', {}).get('startup', "🤖 机器人已启动")
             
-            for monitor in monitors:
+            # 获取所有工会
+            guilds = self.bot.guilds
+            log(f"机器人加入的工会数量: {len(guilds)}", "info")
+            
+            for guild in guilds:
                 try:
-                    channel = self.bot.get_channel(monitor.channel_id)
-                    if channel:
-                        # 解析显示列
-                        display_columns = json.loads(monitor.display_columns)
-                        
-                        embed = discord.Embed(
-                            title="🤖 Notion监控已启动",
-                            description="机器人已成功启动，正在监控以下内容：",
-                            color=discord.Color.green(),
-                            timestamp=datetime.utcnow()
-                        )
-                        
-                        embed.add_field(
-                            name="📊 数据库",
-                            value=f"`{monitor.database_id}`",
-                            inline=False
-                        )
-                        
-                        embed.add_field(
-                            name="⏱️ 检查间隔",
-                            value=f"每 {monitor.interval} 分钟",
-                            inline=True
-                        )
-                        
-                        embed.add_field(
-                            name="📋 监控列",
-                            value=", ".join(display_columns) if display_columns else "无",
-                            inline=True
-                        )
-                        
-                        # embed.set_footer(text="Bot by Your Name")
-                        
-                        await channel.send(embed=embed)
-                        
+                    log(f"正在处理工会: {guild.name} ({guild.id})", "debug")
+                    
+                    # 获取该工会的所有活动监控配置
+                    monitors = self.db.query(models.NotionMonitorConfig).filter_by(
+                        guild_id=guild.id,
+                        is_active=True
+                    ).all()
+                    
+                    if not monitors:
+                        log(f"工会 {guild.name} 没有活动的监控配置", "debug")
+                        continue
+                    
+                    log(f"工会 {guild.name} 有 {len(monitors)} 个活动监控", "debug")
+                    
+                    for monitor in monitors:
+                        try:
+                            channel = self.bot.get_channel(monitor.channel_id)
+                            if channel:
+                                embed = discord.Embed(
+                                    title="系统通知",
+                                    description=startup_message,
+                                    color=discord.Color.green(),
+                                    timestamp=datetime.utcnow()
+                                )
+                                
+                                # 添加监控信息
+                                embed.add_field(
+                                    name="📊 监控数据库",
+                                    value=f"`{monitor.database_id}`",
+                                    inline=False
+                                )
+                                
+                                embed.add_field(
+                                    name="⏱️ 检查间隔",
+                                    value=f"每 {monitor.interval} 分钟",
+                                    inline=True
+                                )
+                                
+                                try:
+                                    display_columns = json.loads(monitor.display_columns)
+                                    embed.add_field(
+                                        name="📋 监控列",
+                                        value=", ".join(display_columns) if display_columns else "无",
+                                        inline=True
+                                    )
+                                except:
+                                    pass
+
+                                # 添加随机footer
+                                footer_text = get_random_footer()
+                                if footer_text:
+                                    embed.set_footer(text=footer_text)
+                                
+                                await channel.send(embed=embed)
+                                log(f"已发送启动通知到频道 {channel.name} ({channel.id})", "debug")
+                            else:
+                                log(f"无法找到频道 {monitor.channel_id}", "info")
+                                
+                        except Exception as e:
+                            log(f"发送启动通知到频道 {monitor.channel_id} 时出错: {e}", "info")
+                            
                 except Exception as e:
-                    print(f"发送启动通知到频道 {monitor.channel_id} 时出错: {e}")
+                    log(f"处理工会 {guild.name} 时出错: {e}", "info")
                     
         except Exception as e:
-            print(f"发送启动通知时出错: {e}")
+            log(f"发送启动通知时出错: {e}", "info")
+            import traceback
+            log(f"错误堆栈:\n{traceback.format_exc()}", "debug")
 
     @send_startup_notification.before_loop
     async def before_startup_notification(self):
@@ -1162,7 +1200,7 @@ class NotionMonitor(commands.Cog):
                     print(f"获取页面失败: {response.text}")
                     break
             
-            print(f"初始快照创建完��，共处理 {total_pages} 个页面")
+            print(f"初始快照创建完，共处理 {total_pages} 个页面")
             
         except Exception as e:
             print(f"创建初始快照时出错: {e}")
