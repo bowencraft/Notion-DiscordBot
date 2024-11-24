@@ -167,7 +167,7 @@ class NotionMonitor(commands.Cog):
             print(f"解析时间字符串失败: {e}")
             return datetime.utcnow()
 
-    def compare_page_changes(self, old_content, new_content):
+    async def compare_page_changes(self, old_content, new_content, guild_id=None):
         """比较页面变化"""
         changes = []
         try:
@@ -177,20 +177,20 @@ class NotionMonitor(commands.Cog):
             for prop_name in new_props:
                 if prop_name not in old_props:
                     # 新增的属性
-                    new_value = self.format_property_value(new_props[prop_name])
+                    new_value = await self.format_property_value(new_props[prop_name], guild_id)
                     if new_value:
                         changes.append(f"新增 {prop_name}: {new_value}")
                 else:
                     # 比较现有属性
-                    old_value = self.format_property_value(old_props[prop_name])
-                    new_value = self.format_property_value(new_props[prop_name])
+                    old_value = await self.format_property_value(old_props[prop_name], guild_id)
+                    new_value = await self.format_property_value(new_props[prop_name], guild_id)
                     if old_value != new_value:
                         changes.append(f"修改 {prop_name}: {old_value} → {new_value}")
             
             for prop_name in old_props:
                 if prop_name not in new_props:
                     # 删除的属性
-                    old_value = self.format_property_value(old_props[prop_name])
+                    old_value = await self.format_property_value(old_props[prop_name], guild_id)
                     if old_value:
                         changes.append(f"删除 {prop_name}: {old_value}")
                         
@@ -199,7 +199,7 @@ class NotionMonitor(commands.Cog):
             
         return changes
 
-    def format_page_message(self, page, selected_columns=None, changes=None, guild_id=None):
+    async def format_page_message(self, page, selected_columns=None, changes=None, guild_id=None):
         """将Notion页面格式化为Discord消息"""
         try:
             # 打印完整的页面数据到后台
@@ -215,7 +215,7 @@ class NotionMonitor(commands.Cog):
             embed_color = discord.Color.blue()  # 默认颜色
             for prop_name, prop_data in page.get("properties", {}).items():
                 if prop_data.get("type") in ["select", "multi_select"]:
-                    # 对于select，直接获取颜色
+                    # 对于select���直接获取颜色
                     if prop_data.get("type") == "select" and prop_data.get("select"):
                         color = prop_data["select"].get("color")
                         if color:
@@ -238,7 +238,7 @@ class NotionMonitor(commands.Cog):
             if selected_columns:
                 for column in selected_columns:
                     if column in page["properties"]:
-                        value = self.format_property_value(page["properties"][column], guild_id)
+                        value = await self.format_property_value(page["properties"][column], guild_id)
                         if value:
                             embed.add_field(name=column, value=value, inline=True)
             else:
@@ -285,14 +285,14 @@ class NotionMonitor(commands.Cog):
                 
                 if snapshot:
                     # 现有页面更新
-                    changes = self.compare_page_changes(snapshot.content, page)
+                    changes = await self.compare_page_changes(snapshot.content, page, monitor.guild_id)
                     if changes:
                         # 更新快照
                         snapshot.content = json.dumps(page)
                         snapshot.last_updated = datetime.utcnow().isoformat() + "Z"
                         updates.append((page, changes))
                 else:
-                    # 新面
+                    # 新页面
                     page["is_new"] = True
                     # 创建新快照
                     new_snapshot = models.NotionPageSnapshot(
@@ -332,7 +332,7 @@ class NotionMonitor(commands.Cog):
                         # 处理更新并获取变更信息
                         updates = await self.process_page_updates(monitor, pages)
                         for page, changes in updates:
-                            message = self.format_page_message(
+                            message = await self.format_page_message(
                                 page,
                                 json.loads(monitor.display_columns),
                                 changes,
@@ -380,7 +380,7 @@ class NotionMonitor(commands.Cog):
             payload = json.dumps(query_data)
             response = requests.post(url, headers=headers, data=payload)
             
-            print(f"Notion API响应状态码: {response.status_code}")
+            print(f"Notion API响应状态: {response.status_code}")
             if response.status_code == 200:
                 result = response.json()
                 print(f"找到 {len(result.get('results', []))} 条更新")
@@ -393,7 +393,42 @@ class NotionMonitor(commands.Cog):
             print(f"从Notion获取页面时出错: {e}")
             return []
 
-    def format_property_value(self, property_data, guild_id=None):
+    async def get_related_pages(self, guild_info, page_ids):
+        """获取关联页面的信息"""
+        try:
+            results = []
+            for page_id in page_ids:
+                url = f"https://api.notion.com/v1/pages/{page_id}"
+                headers = {
+                    'Authorization': guild_info.notion_api_key,
+                    'Notion-Version': '2021-08-16'
+                }
+                
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url, headers=headers) as response:
+                        if response.status == 200:
+                            page = await response.json()
+                            # 获取页面标题
+                            title = None
+                            for prop_name, prop_data in page["properties"].items():
+                                if prop_data["type"] == "title":
+                                    title_list = prop_data.get("title", [])
+                                    if title_list and len(title_list) > 0:
+                                        title = title_list[0].get("plain_text", "无标题")
+                                    break
+                            
+                            if title:
+                                results.append({
+                                    'title': title,
+                                    'url': page.get('url', '')
+                                })
+            
+            return results
+        except Exception as e:
+            print(f"获取关联页面时出错: {e}")
+            return []
+
+    async def format_property_value(self, property_data, guild_id=None):
         """格式化Notion属性值"""
         try:
             property_type = property_data.get("type")
@@ -509,12 +544,40 @@ class NotionMonitor(commands.Cog):
             elif property_type == "last_edited_time":
                 return property_data.get("last_edited_time", "")
                 
+            elif property_type == "relation":
+                relation_data = property_data.get("relation", [])
+                if not relation_data:
+                    return None
+                    
+                # 获取所有关联页面的ID
+                page_ids = [item["id"] for item in relation_data]
+                if not page_ids:
+                    return None
+                    
+                # 如果没有提供guild_id，只返回ID列表
+                if not guild_id:
+                    return ", ".join([f"`{id}`" for id in page_ids])
+                    
+                # 获取guild_info
+                guild_info = self.bot.guild_info[str(guild_id)]
+                
+                # 直接调用异步函数
+                related_pages = await self.get_related_pages(guild_info, page_ids)
+                
+                # 格式化为标题和链接
+                if related_pages:
+                    return "\n".join([
+                        f"[{page['title']}]({page['url']})"
+                        for page in related_pages
+                    ])
+                return None
+                
             return str(property_data.get(property_type, ""))
             
         except Exception as e:
             print(f"格式化属性值时出错: {e}")
             print(f"属性数据: {json.dumps(property_data, indent=2)}")
-            return "格式化错误"
+            return None
 
     def format_default_message(self, page, embed):
         """使用默认格式创建消息"""
@@ -559,7 +622,7 @@ class NotionMonitor(commands.Cog):
     async def setup_monitor(self, ctx):
         """设置Notion数据库监控"""
         try:
-            # 检查是否已经设置过
+            # 检查是否已经设置
             monitor = self.db.query(models.NotionMonitorConfig).filter_by(
                 guild_id=ctx.guild.id,
                 channel_id=ctx.channel.id
@@ -899,7 +962,7 @@ class NotionMonitor(commands.Cog):
             return None
 
     async def create_initial_snapshots(self, guild_info, monitor):
-        """为数据库中的所有页面创建初始快照"""
+        """为数据库中的所有面创建初始快照"""
         try:
             print(f"正在为数据库 {monitor.database_id} 创建初始快照...")
             
