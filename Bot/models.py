@@ -61,3 +61,15 @@ class NotionPageSnapshot(Base):
         self.page_id = page_id
         self.content = content
         self.last_updated = last_updated
+
+class NotionDiscordUserMap(Base):
+    __tablename__ = 'notion_discord_user_maps'
+    id = Column(Integer, primary_key=True, index=True)
+    guild_id = Column(Integer, nullable=False)
+    notion_user_name = Column(String, nullable=False)
+    discord_user_id = Column(String, nullable=False)
+
+    def __init__(self, guild_id, notion_user_name, discord_user_id):
+        self.guild_id = guild_id
+        self.notion_user_name = notion_user_name
+        self.discord_user_id = discord_user_id

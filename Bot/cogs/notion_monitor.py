@@ -199,9 +199,18 @@ class NotionMonitor(commands.Cog):
             
         return changes
 
-    def format_page_message(self, page, selected_columns=None, changes=None):
+    def format_page_message(self, page, selected_columns=None, changes=None, guild_id=None):
         """将Notion页面格式化为Discord消息"""
         try:
+            # 打印完整的页面数据到后台
+            print("\n=== Notion页面数据 ===")
+            print(f"页面ID: {page.get('id')}")
+            print(f"最后编辑时间: {page.get('last_edited_time')}")
+            print("属性:")
+            for prop_name, prop_data in page.get("properties", {}).items():
+                print(f"  {prop_name}: {json.dumps(prop_data, ensure_ascii=False, indent=2)}")
+            print("====================\n")
+
             embed = discord.Embed(
                 title="📝 Notion更新通知",
                 color=discord.Color.blue(),
@@ -212,7 +221,7 @@ class NotionMonitor(commands.Cog):
             if selected_columns:
                 for column in selected_columns:
                     if column in page["properties"]:
-                        value = self.format_property_value(page["properties"][column])
+                        value = self.format_property_value(page["properties"][column], guild_id)
                         if value:
                             embed.add_field(name=column, value=value, inline=True)
             else:
@@ -366,7 +375,7 @@ class NotionMonitor(commands.Cog):
             print(f"从Notion获取页面时出错: {e}")
             return []
 
-    def format_property_value(self, property_data):
+    def format_property_value(self, property_data, guild_id=None):
         """格式化Notion属性值"""
         try:
             property_type = property_data.get("type")
@@ -402,8 +411,11 @@ class NotionMonitor(commands.Cog):
                     return start
                     
             elif property_type == "people":
-                people = property_data.get("people", [])
-                return ", ".join([person.get("name", "未知") for person in people])
+                if guild_id:
+                    return self.format_user_value(property_data.get("people", []), guild_id)
+                else:
+                    people = property_data.get("people", [])
+                    return ", ".join([person.get("name", "未知") for person in people])
                 
             elif property_type == "files":
                 files = property_data.get("files", [])
@@ -443,7 +455,7 @@ class NotionMonitor(commands.Cog):
             
         except Exception as e:
             print(f"格式化属性值时出错: {e}")
-            print(f"属性数据: {json.dumps(property_data, indent=2)}")  # 添加详细的错误日志
+            print(f"属性数据: {json.dumps(property_data, indent=2)}")
             return "格式化错误"
 
     def format_default_message(self, page, embed):
@@ -473,7 +485,7 @@ class NotionMonitor(commands.Cog):
                 if tags:
                     embed.add_field(name="🏷️ 标签", value=tags, inline=True)
             
-            # 添加编辑时间
+            # 添加编��时间
             if self.format_config['show_edit_time']:
                 edit_time = page.get("last_edited_time", "未知").split("T")[0]
                 embed.add_field(name="⏰ 更新间", value=edit_time, inline=True)
@@ -590,6 +602,10 @@ class NotionMonitor(commands.Cog):
             
             self.db.commit()
 
+            # 创建初始快照
+            await ctx.send("正在创建数据库快照，这可能需要一些时间...")
+            await self.create_initial_snapshots(guild_info, monitor)
+
             embed = discord.Embed(
                 title="监控设置完成",
                 description=f"已设置监控:\n"
@@ -604,9 +620,9 @@ class NotionMonitor(commands.Cog):
         except asyncio.TimeoutError:
             await ctx.send("设置超时，请重新开始")
         except Exception as e:
-            print(f"设置监控时出错: {str(e)}")  # 添加详细的错误日志
+            print(f"设置监控时出错: {str(e)}")
             import traceback
-            traceback.print_exc()  # 打印完整的错误堆栈
+            traceback.print_exc()
             await ctx.send(f"设置失败: {str(e)}")
 
     async def get_database_structure(self, guild_id, database_id):
@@ -719,6 +735,179 @@ class NotionMonitor(commands.Cog):
     async def before_startup_notification(self):
         """等待机器人准备就绪"""
         await self.bot.wait_until_ready()
+
+    @commands.command(name="map_users", aliases=["mu"])
+    @commands.has_permissions(administrator=True)
+    async def map_users(self, ctx):
+        """映射Notion用户到Discord用户"""
+        try:
+            embed = discord.Embed(
+                title="用户映射",
+                description="请按以下格式输入映射关系：\n"
+                           "Notion用户名1 @Discord用户1\n"
+                           "Notion用户名2 @Discord用户2\n"
+                           "...\n"
+                           "（每行一个映射，输入 'done' 完成）",
+                color=discord.Color.blue()
+            )
+            await ctx.send(embed=embed)
+
+            mappings = []
+            while True:
+                msg = await self.bot.wait_for(
+                    "message",
+                    check=lambda m: m.author == ctx.author and m.channel == ctx.channel,
+                    timeout=300
+                )
+
+                if msg.content.lower() == 'done':
+                    break
+
+                # 检查是否提及了用户
+                if not msg.mentions:
+                    await ctx.send("❌ 请确保使用 @ 提及Discord用户")
+                    continue
+
+                # 分割Notion用户名和Discord用户
+                parts = msg.content.split()
+                if len(parts) < 2:
+                    await ctx.send("❌ 格式错误，请输入Notion用户名和Discord用户")
+                    continue
+
+                notion_name = parts[0]
+                discord_user = msg.mentions[0]
+                mappings.append((notion_name, discord_user.id))
+
+            # 保存映射
+            for notion_name, discord_id in mappings:
+                # 检查是否已存在映射
+                existing = self.db.query(models.NotionDiscordUserMap).filter_by(
+                    guild_id=ctx.guild.id,
+                    notion_user_name=notion_name
+                ).first()
+
+                if existing:
+                    existing.discord_user_id = discord_id
+                else:
+                    new_mapping = models.NotionDiscordUserMap(
+                        guild_id=ctx.guild.id,
+                        notion_user_name=notion_name,
+                        discord_user_id=discord_id
+                    )
+                    self.db.add(new_mapping)
+
+            self.db.commit()
+
+            # 显示所有映射
+            all_mappings = self.db.query(models.NotionDiscordUserMap).filter_by(
+                guild_id=ctx.guild.id
+            ).all()
+
+            embed = discord.Embed(
+                title="当前用户映射",
+                color=discord.Color.green()
+            )
+            for mapping in all_mappings:
+                discord_user = ctx.guild.get_member(int(mapping.discord_user_id))
+                embed.add_field(
+                    name=mapping.notion_user_name,
+                    value=discord_user.mention if discord_user else "未找到用户",
+                    inline=True
+                )
+
+            await ctx.send(embed=embed)
+
+        except asyncio.TimeoutError:
+            await ctx.send("⌛ 设置超时，请重新开始")
+        except Exception as e:
+            await ctx.send(f"❌ 设置失败: {str(e)}")
+
+    def format_user_value(self, users_data, guild_id):
+        """格式化用户属性值"""
+        try:
+            # 获取该服务器的所有用户映射
+            user_mappings = {
+                m.notion_user_name: m.discord_user_id 
+                for m in self.db.query(models.NotionDiscordUserMap).filter_by(guild_id=guild_id).all()
+            }
+
+            formatted_users = []
+            for user in users_data:
+                user_name = user.get("name", "未知用户")
+                discord_user_id = user_mappings.get(user_name)
+                
+                if discord_user_id:
+                    formatted_users.append(f"<@{discord_user_id}>")
+                else:
+                    formatted_users.append(user_name)
+
+            return ", ".join(formatted_users)
+        except Exception as e:
+            print(f"格式化用户值时出错: {e}")
+            return "格式化错误"
+
+    async def create_initial_snapshots(self, guild_info, monitor):
+        """为数据库中的所有页面创建初始快照"""
+        try:
+            print(f"正在为数据库 {monitor.database_id} 创建初始快照...")
+            
+            url = "https://api.notion.com/v1/databases/" + monitor.database_id + "/query"
+            headers = {
+                'Authorization': guild_info.notion_api_key,
+                'Notion-Version': '2021-08-16',
+                'Content-Type': 'application/json'
+            }
+            
+            # 查询所有页面
+            has_more = True
+            start_cursor = None
+            total_pages = 0
+            
+            while has_more:
+                query_data = {}
+                if start_cursor:
+                    query_data["start_cursor"] = start_cursor
+                
+                payload = json.dumps(query_data)
+                response = requests.post(url, headers=headers, data=payload)
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    pages = result.get("results", [])
+                    
+                    # 为每个页面创建快照
+                    for page in pages:
+                        # 检查是否已存在快照
+                        existing = self.db.query(models.NotionPageSnapshot).filter_by(
+                            monitor_id=monitor.id,
+                            page_id=page["id"]
+                        ).first()
+                        
+                        if not existing:
+                            new_snapshot = models.NotionPageSnapshot(
+                                monitor_id=monitor.id,
+                                page_id=page["id"],
+                                content=json.dumps(page),
+                                last_updated=datetime.utcnow().isoformat() + "Z"
+                            )
+                            self.db.add(new_snapshot)
+                            total_pages += 1
+                    
+                    self.db.commit()
+                    
+                    # 检查是否还有更多页面
+                    has_more = result.get("has_more", False)
+                    start_cursor = result.get("next_cursor")
+                else:
+                    print(f"获取页面失败: {response.text}")
+                    break
+            
+            print(f"初始快照创建完成，共处理 {total_pages} 个页面")
+            
+        except Exception as e:
+            print(f"创建初始快照时出错: {e}")
+            import traceback
+            traceback.print_exc()
 
 def setup(bot):
     bot.add_cog(NotionMonitor(bot)) 

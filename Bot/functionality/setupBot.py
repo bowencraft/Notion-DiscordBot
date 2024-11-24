@@ -57,7 +57,7 @@ async def setupConversation(ctx, bot):
     notion_api_key = msg.content.strip()
 
     # 验证API密钥
-    if not notion_api_key.startswith('secret_'):
+    if not notion_api_key.startswith('ntn_'):
         embed = discord.Embed(
             title="错误",
             description="无效的Notion API密钥",
