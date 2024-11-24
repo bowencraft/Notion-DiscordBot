@@ -201,26 +201,22 @@ def fixDatabase():
 
 
 def getGuildInfo():
-    # read guild_data.json
+    # 读取guild_data.json
     guilds = db.query(models.Clients).all()
-    # check if the records are encrypted
+    # 检查是否加密
     data = {}
     for guild in guilds:
-        if getKey(guild.notion_db_id) and getKey(guild.notion_api_key):
-            # all good
+        if getKey(guild.notion_api_key):
+            # 已加密
             obj = models.Clients(
                 guild.guild_id,
                 getKey(guild.notion_api_key),
-                getKey(guild.notion_db_id),
-                guild.tag,
                 guild.prefix
             )
-            print(obj.notion_api_key)
-            print(obj.notion_db_id)
             data[str(guild.guild_id)] = obj
         else:
-            # database rescue 
-            print("Database not encrypt! Start encryption")
+            # 数据库需要加密
+            print("Database not encrypted! Start encryption")
             print("Database fixed")
             fixDatabase()
             return getGuildInfo()

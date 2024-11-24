@@ -211,9 +211,26 @@ class NotionMonitor(commands.Cog):
                 print(f"  {prop_name}: {json.dumps(prop_data, ensure_ascii=False, indent=2)}")
             print("====================\n")
 
+            # 获取颜色
+            embed_color = discord.Color.blue()  # 默认颜色
+            for prop_name, prop_data in page.get("properties", {}).items():
+                if prop_data.get("type") in ["select", "multi_select"]:
+                    # 对于select，直接获取颜色
+                    if prop_data.get("type") == "select" and prop_data.get("select"):
+                        color = prop_data["select"].get("color")
+                        if color:
+                            embed_color = self.notion_color_to_discord(color)
+                            break
+                    # 对于multi_select，使用第一个选项的颜色
+                    elif prop_data.get("type") == "multi_select" and prop_data.get("multi_select"):
+                        if prop_data["multi_select"] and prop_data["multi_select"][0].get("color"):
+                            color = prop_data["multi_select"][0]["color"]
+                            embed_color = self.notion_color_to_discord(color)
+                            break
+
             embed = discord.Embed(
                 title="📝 Notion更新通知",
-                color=discord.Color.blue(),
+                color=embed_color,
                 timestamp=datetime.utcnow()
             )
             
@@ -225,7 +242,7 @@ class NotionMonitor(commands.Cog):
                         if value:
                             embed.add_field(name=column, value=value, inline=True)
             else:
-                # 使用默认格式
+                # 使默认格式
                 return self.format_default_message(page, embed)
             
             # 添加页面链接
@@ -275,7 +292,7 @@ class NotionMonitor(commands.Cog):
                         snapshot.last_updated = datetime.utcnow().isoformat() + "Z"
                         updates.append((page, changes))
                 else:
-                    # 新页面
+                    # 新面
                     page["is_new"] = True
                     # 创建新快照
                     new_snapshot = models.NotionPageSnapshot(
@@ -318,7 +335,8 @@ class NotionMonitor(commands.Cog):
                             message = self.format_page_message(
                                 page,
                                 json.loads(monitor.display_columns),
-                                changes
+                                changes,
+                                monitor.guild_id
                             )
                             if message:
                                 await channel.send(embed=message)
@@ -338,7 +356,7 @@ class NotionMonitor(commands.Cog):
     def get_notion_pages(self, guild_info, monitor):
         """获取自上次检查以来更新的Notion页面"""
         try:
-            print(f"上次检查时间: {monitor.last_checked}")
+            print(f"上检查时间: {monitor.last_checked}")
             
             url = "https://api.notion.com/v1/databases/" + monitor.database_id + "/query"
             headers = {
@@ -384,13 +402,53 @@ class NotionMonitor(commands.Cog):
                 
             if property_type == "title":
                 text_list = property_data.get("title", [])
-                if text_list and len(text_list) > 0:
-                    return text_list[0].get("plain_text", "")
+                formatted_texts = []
+                
+                for text_item in text_list:
+                    if text_item.get("type") == "mention" and text_item["mention"].get("type") == "user":
+                        # 处理用户提及
+                        user_id = text_item["mention"]["user"].get("id")
+                        if guild_id and user_id:
+                            # 查找用户映射
+                            user_map = self.db.query(models.NotionDiscordUserMap).filter_by(
+                                guild_id=guild_id,
+                                notion_user_id=user_id
+                            ).first()
+                            if user_map:
+                                formatted_texts.append(user_map.discord_mention)
+                            else:
+                                formatted_texts.append(f"`{user_id}`")
+                    else:
+                        # 处理普通文本
+                        formatted_texts.append(text_item.get("plain_text", ""))
+                
+                return "".join(formatted_texts) if formatted_texts else None
                     
             elif property_type == "rich_text":
                 text_list = property_data.get("rich_text", [])
-                if text_list and len(text_list) > 0:
-                    return text_list[0].get("plain_text", "")
+                formatted_texts = []
+                
+                for text_item in text_list:
+                    if text_item.get("type") == "mention" and text_item["mention"].get("type") == "user":
+                        # 处理用户提及
+                        user_id = text_item["mention"]["user"].get("id")
+                        if guild_id and user_id:
+                            # 查找用户映射
+                            user_map = self.db.query(models.NotionDiscordUserMap).filter_by(
+                                guild_id=guild_id,
+                                notion_user_id=user_id
+                            ).first()
+                            if user_map:
+                                formatted_texts.append(user_map.discord_mention)
+                            else:
+                                formatted_texts.append(f"`{user_id}`")
+                        else:
+                            formatted_texts.append(text_item.get("plain_text", ""))
+                    else:
+                        # 处理普通文本
+                        formatted_texts.append(text_item.get("plain_text", ""))
+                
+                return " ".join(formatted_texts) if formatted_texts else None
                     
             elif property_type == "select":
                 select_data = property_data.get("select")
@@ -416,7 +474,7 @@ class NotionMonitor(commands.Cog):
                 else:
                     people = property_data.get("people", [])
                     return ", ".join([person.get("name", "未知") for person in people])
-                
+                    
             elif property_type == "files":
                 files = property_data.get("files", [])
                 return ", ".join([
@@ -485,7 +543,7 @@ class NotionMonitor(commands.Cog):
                 if tags:
                     embed.add_field(name="🏷️ 标签", value=tags, inline=True)
             
-            # 添加编��时间
+            # 添加编辑时间
             if self.format_config['show_edit_time']:
                 edit_time = page.get("last_edited_time", "未知").split("T")[0]
                 embed.add_field(name="⏰ 更新间", value=edit_time, inline=True)
@@ -568,9 +626,9 @@ class NotionMonitor(commands.Cog):
                         if 0 <= idx < len(db_columns):
                             selected_columns.append(db_columns[idx])
                         else:
-                            await ctx.send(f"编号 {num} 超出范围，已忽略")
+                            await ctx.send(f"编号 {num} 超出围，已忽略")
                     except ValueError:
-                        await ctx.send(f"效的编号 '{num}'，已忽略")
+                        await ctx.send(f"的编号 '{num}'，已忽略")
                 
                 if not selected_columns:
                     await ctx.send("未选择任何有效的列，请重新设置")
@@ -738,113 +796,107 @@ class NotionMonitor(commands.Cog):
 
     @commands.command(name="map_users", aliases=["mu"])
     @commands.has_permissions(administrator=True)
-    async def map_users(self, ctx):
-        """映射Notion用户到Discord用户"""
+    async def map_users(self, ctx, notion_id: str = None):
+        """映射Notion用户ID到Discord用户"""
         try:
-            embed = discord.Embed(
-                title="用户映射",
-                description="请按以下格式输入映射关系：\n"
-                           "Notion用户名1 @Discord用户1\n"
-                           "Notion用户名2 @Discord用户2\n"
-                           "...\n"
-                           "（每行一个映射，输入 'done' 完成）",
-                color=discord.Color.blue()
-            )
-            await ctx.send(embed=embed)
-
-            mappings = []
-            while True:
-                msg = await self.bot.wait_for(
-                    "message",
-                    check=lambda m: m.author == ctx.author and m.channel == ctx.channel,
-                    timeout=300
+            if not notion_id or not ctx.message.mentions:
+                embed = discord.Embed(
+                    title="用户映射",
+                    description="请使用以下格式：\n"
+                               "`*mu <Notion用户ID> @Discord用户`\n"
+                               "Notion用户ID是形如'e79a0b74-3aba-4149-9f74-0bb5791a6ee6'的UUID",
+                    color=discord.Color.blue()
                 )
-
-                if msg.content.lower() == 'done':
-                    break
-
-                # 检查是否提及了用户
-                if not msg.mentions:
-                    await ctx.send("❌ 请确保使用 @ 提及Discord用户")
-                    continue
-
-                # 分割Notion用户名和Discord用户
-                parts = msg.content.split()
-                if len(parts) < 2:
-                    await ctx.send("❌ 格式错误，请输入Notion用户名和Discord用户")
-                    continue
-
-                notion_name = parts[0]
-                discord_user = msg.mentions[0]
-                mappings.append((notion_name, discord_user.id))
-
-            # 保存映射
-            for notion_name, discord_id in mappings:
-                # 检查是否已存在映射
-                existing = self.db.query(models.NotionDiscordUserMap).filter_by(
-                    guild_id=ctx.guild.id,
-                    notion_user_name=notion_name
-                ).first()
-
-                if existing:
-                    existing.discord_user_id = discord_id
-                else:
-                    new_mapping = models.NotionDiscordUserMap(
-                        guild_id=ctx.guild.id,
-                        notion_user_name=notion_name,
-                        discord_user_id=discord_id
+                # 显示当前映射
+                all_mappings = self.db.query(models.NotionDiscordUserMap).filter_by(
+                    guild_id=ctx.guild.id
+                ).all()
+                if all_mappings:
+                    mapping_text = []
+                    for mapping in all_mappings:
+                        mapping_text.append(
+                            f"`{mapping.notion_user_id}` → {mapping.discord_mention}"
+                        )
+                    embed.add_field(
+                        name="当前映射",
+                        value="\n".join(mapping_text),
+                        inline=False
                     )
-                    self.db.add(new_mapping)
+                await ctx.send(embed=embed)
+                return
+
+            # 验证UUID格式
+            if not len(notion_id) == 36:
+                await ctx.send("❌ 无效的Notion用户ID格式")
+                return
+
+            discord_user = ctx.message.mentions[0]
+            discord_mention = discord_user.mention
+            
+            # 保存映射
+            existing = self.db.query(models.NotionDiscordUserMap).filter_by(
+                guild_id=ctx.guild.id,
+                notion_user_id=notion_id
+            ).first()
+
+            if existing:
+                existing.discord_mention = discord_mention
+                print(f"更新映射: {notion_id} -> {discord_mention} (更新)")
+            else:
+                new_mapping = models.NotionDiscordUserMap(
+                    guild_id=ctx.guild.id,
+                    notion_user_id=notion_id,
+                    discord_mention=discord_mention
+                )
+                self.db.add(new_mapping)
+                print(f"新增映射: {notion_id} -> {discord_mention} (新增)")
 
             self.db.commit()
+            await ctx.send(f"✅ 已映射 `{notion_id}` → {discord_mention}")
 
-            # 显示所有映射
-            all_mappings = self.db.query(models.NotionDiscordUserMap).filter_by(
-                guild_id=ctx.guild.id
-            ).all()
-
-            embed = discord.Embed(
-                title="当前用户映射",
-                color=discord.Color.green()
-            )
-            for mapping in all_mappings:
-                discord_user = ctx.guild.get_member(int(mapping.discord_user_id))
-                embed.add_field(
-                    name=mapping.notion_user_name,
-                    value=discord_user.mention if discord_user else "未找到用户",
-                    inline=True
-                )
-
-            await ctx.send(embed=embed)
-
-        except asyncio.TimeoutError:
-            await ctx.send("⌛ 设置超时，请重新开始")
         except Exception as e:
+            print(f"映射用户时出错: {e}")
             await ctx.send(f"❌ 设置失败: {str(e)}")
 
     def format_user_value(self, users_data, guild_id):
         """格式化用户属性值"""
         try:
+            if not users_data:
+                return None
+
+            print(f"格式化用户数据: {json.dumps(users_data, indent=2)}")
+            print(f"Guild ID: {guild_id}")
+
             # 获取该服务器的所有用户映射
             user_mappings = {
-                m.notion_user_name: m.discord_user_id 
+                m.notion_user_id: m.discord_mention 
                 for m in self.db.query(models.NotionDiscordUserMap).filter_by(guild_id=guild_id).all()
             }
+            print(f"用户映射: {json.dumps(user_mappings, indent=2)}")
 
             formatted_users = []
             for user in users_data:
-                user_name = user.get("name", "未知用户")
-                discord_user_id = user_mappings.get(user_name)
-                
-                if discord_user_id:
-                    formatted_users.append(f"<@{discord_user_id}>")
+                user_id = user.get("id")
+                if not user_id:
+                    print(f"跳过无效用户数据: {json.dumps(user, indent=2)}")
+                    continue
+                    
+                discord_mention = user_mappings.get(user_id)
+                if discord_mention:
+                    formatted_users.append(discord_mention)
+                    print(f"用户 {user_id} 映射到 {discord_mention}")
                 else:
-                    formatted_users.append(user_name)
+                    formatted_users.append(f"`{user_id}`")
+                    print(f"用户 {user_id} 未找到映射")
 
-            return ", ".join(formatted_users)
+            result = ", ".join(formatted_users) if formatted_users else None
+            print(f"最终格式化结果: {result}")
+            return result
+
         except Exception as e:
             print(f"格式化用户值时出错: {e}")
-            return "格式化错误"
+            print(f"用户数据: {json.dumps(users_data, indent=2)}")
+            return None
 
     async def create_initial_snapshots(self, guild_info, monitor):
         """为数据库中的所有页面创建初始快照"""
@@ -908,6 +960,22 @@ class NotionMonitor(commands.Cog):
             print(f"创建初始快照时出错: {e}")
             import traceback
             traceback.print_exc()
+
+    def notion_color_to_discord(self, notion_color):
+        """将Notion的颜色转换为Discord的颜色"""
+        color_map = {
+            "blue": discord.Color.blue(),
+            "red": discord.Color.red(),
+            "pink": discord.Color.magenta(),
+            "yellow": discord.Color.gold(),
+            "orange": discord.Color.orange(),
+            "green": discord.Color.green(),
+            "purple": discord.Color.purple(),
+            "brown": discord.Color.dark_gold(),
+            "gray": discord.Color.dark_gray(),
+            "default": discord.Color.blue()
+        }
+        return color_map.get(notion_color, color_map["default"])
 
 def setup(bot):
     bot.add_cog(NotionMonitor(bot)) 

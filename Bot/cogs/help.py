@@ -37,7 +37,8 @@ class Help(commands.Cog):
             f"```{prefix}monitor_stop (或 mstop)```": "停止当前频道的监控",
             f"```{prefix}notion_monitor (或 nm)```": "立即执行一次更新检查",
             f"```{prefix}monitor_config (或 mc)```": "查看当前监控配置",
-            f"```{prefix}mc interval <分钟>```": "设置检查间隔时间"
+            f"```{prefix}mc interval <分钟>```": "设置检查间隔时间",
+            f"```{prefix}map_users (或 mu)```": "映射Notion用户ID到Discord用户"
         }
 
         embed = discord.Embed(
