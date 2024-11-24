@@ -8,45 +8,29 @@ try:
 except:
     PREFIX = "*"
 
-class Clients(Base):
-    __tablename__ = 'clients'
-    id = Column(Integer, primary_key=True, index=True)
-    guild_id = Column(Integer, index=True, nullable=False)
-    notion_api_key = Column(String, nullable=False)
-    prefix = Column(String, default=PREFIX)
-
-    def __init__(self, guild_id, notion_api_key, prefix=PREFIX):
-        self.guild_id = guild_id
-        self.notion_api_key = notion_api_key
-        self.prefix = prefix
-
-    @property
-    def serialize(self):
-        return {
-            "guild_id": self.guild_id,
-            "notion_api_key": self.notion_api_key,
-            "prefix": self.prefix,
-        }
-
 class NotionMonitorConfig(Base):
     __tablename__ = 'notion_monitors'
     id = Column(Integer, primary_key=True, index=True)
-    guild_id = Column(Integer, index=True, nullable=False)
+    guild_id = Column(Integer, nullable=False)
     channel_id = Column(Integer, nullable=False)
+    notion_api_key = Column(String, nullable=False)
     database_id = Column(String, nullable=False)
-    interval = Column(Integer, default=2)  # 监控间隔（分钟）
-    display_columns = Column(String, nullable=False)  # JSON格式存储要显示的列
+    interval = Column(Integer, default=2)
+    display_columns = Column(String, nullable=False)
     is_active = Column(Boolean, default=False)
     last_checked = Column(String, nullable=True)
+    prefix = Column(String, default=PREFIX)
 
-    def __init__(self, guild_id, channel_id, database_id, interval=2, display_columns="[]", is_active=False):
+    def __init__(self, guild_id, channel_id, notion_api_key, database_id, interval=2, display_columns="[]", is_active=False, prefix=PREFIX):
         self.guild_id = guild_id
         self.channel_id = channel_id
+        self.notion_api_key = notion_api_key
         self.database_id = database_id
         self.interval = interval
         self.display_columns = display_columns
         self.is_active = is_active
         self.last_checked = None
+        self.prefix = prefix
 
 class NotionPageSnapshot(Base):
     __tablename__ = 'notion_page_snapshots'

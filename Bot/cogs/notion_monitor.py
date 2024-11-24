@@ -215,7 +215,7 @@ class NotionMonitor(commands.Cog):
             embed_color = discord.Color.blue()  # 默认颜色
             for prop_name, prop_data in page.get("properties", {}).items():
                 if prop_data.get("type") in ["select", "multi_select"]:
-                    # 对于select���直接获取颜色
+                    # 对于select直接获取颜色
                     if prop_data.get("type") == "select" and prop_data.get("select"):
                         color = prop_data["select"].get("color")
                         if color:
@@ -323,8 +323,7 @@ class NotionMonitor(commands.Cog):
                     if (datetime.utcnow() - last_check).total_seconds() < monitor.interval * 60:
                         continue
 
-                guild_info = self.bot.guild_info[str(monitor.guild_id)]
-                pages = self.get_notion_pages(guild_info, monitor)
+                pages = self.get_notion_pages(monitor)
                 
                 if pages:
                     channel = self.bot.get_channel(monitor.channel_id)
@@ -353,14 +352,14 @@ class NotionMonitor(commands.Cog):
     async def before_check(self):
         await self.bot.wait_until_ready()
 
-    def get_notion_pages(self, guild_info, monitor):
+    def get_notion_pages(self, monitor):
         """获取自上次检查以来更新的Notion页面"""
         try:
-            print(f"上检查时间: {monitor.last_checked}")
+            print(f"上次检查时间: {monitor.last_checked}")
             
             url = "https://api.notion.com/v1/databases/" + monitor.database_id + "/query"
             headers = {
-                'Authorization': guild_info.notion_api_key,
+                'Authorization': monitor.notion_api_key,
                 'Notion-Version': '2021-08-16',
                 'Content-Type': 'application/json'
             }
@@ -380,7 +379,7 @@ class NotionMonitor(commands.Cog):
             payload = json.dumps(query_data)
             response = requests.post(url, headers=headers, data=payload)
             
-            print(f"Notion API响应状态: {response.status_code}")
+            print(f"Notion API响应状态码: {response.status_code}")
             if response.status_code == 200:
                 result = response.json()
                 print(f"找到 {len(result.get('results', []))} 条更新")
@@ -393,14 +392,14 @@ class NotionMonitor(commands.Cog):
             print(f"从Notion获取页面时出错: {e}")
             return []
 
-    async def get_related_pages(self, guild_info, page_ids):
+    async def get_related_pages(self, monitor, page_ids):
         """获取关联页面的信息"""
         try:
             results = []
             for page_id in page_ids:
                 url = f"https://api.notion.com/v1/pages/{page_id}"
                 headers = {
-                    'Authorization': guild_info.notion_api_key,
+                    'Authorization': monitor.notion_api_key,
                     'Notion-Version': '2021-08-16'
                 }
                 
@@ -622,14 +621,19 @@ class NotionMonitor(commands.Cog):
     async def setup_monitor(self, ctx):
         """设置Notion数据库监控"""
         try:
-            # 检查是否已经设置
+            # 检查是否已经设置过
             monitor = self.db.query(models.NotionMonitorConfig).filter_by(
                 guild_id=ctx.guild.id,
                 channel_id=ctx.channel.id
             ).first()
 
-            # 获取guild_info
-            guild_info = self.bot.guild_info[str(ctx.guild.id)]
+            if not monitor:
+                embed = discord.Embed(
+                    description=f"请先运行 `{PREFIX}setup` 设置此频道的Notion API密钥",
+                    color=discord.Color.red()
+                )
+                await ctx.send(embed=embed)
+                return
 
             # 获取数据库ID
             embed = discord.Embed(description="请输入要监控的Notion数据库ID")
@@ -642,7 +646,7 @@ class NotionMonitor(commands.Cog):
             database_id = msg.content.strip()
 
             # 验证数据库ID
-            db_structure = await self.get_database_structure(ctx.guild.id, database_id)
+            db_structure = await self.get_database_structure_with_key(monitor.notion_api_key, database_id)
             if not db_structure:
                 await ctx.send("无法获取数据库结构，请检查数据库ID是否正确")
                 return
@@ -689,9 +693,9 @@ class NotionMonitor(commands.Cog):
                         if 0 <= idx < len(db_columns):
                             selected_columns.append(db_columns[idx])
                         else:
-                            await ctx.send(f"编号 {num} 超出围，已忽略")
+                            await ctx.send(f"编号 {num} 超出范围，已忽略")
                     except ValueError:
-                        await ctx.send(f"的编号 '{num}'，已忽略")
+                        await ctx.send(f"无效的编号 '{num}'，已忽略")
                 
                 if not selected_columns:
                     await ctx.send("未选择任何有效的列，请重新设置")
@@ -700,32 +704,18 @@ class NotionMonitor(commands.Cog):
                 await ctx.send(f"处理列选择时出错: {str(e)}")
                 return
 
-            # 保存配置
-            if monitor:
-                # 更新现有配置
-                monitor.database_id = database_id
-                monitor.interval = interval
-                monitor.display_columns = json.dumps(selected_columns)
-                monitor.is_active = True
-                monitor.last_checked = datetime.utcnow().isoformat() + "Z"
-            else:
-                # 创建新配置
-                monitor = models.NotionMonitorConfig(
-                    guild_id=ctx.guild.id,
-                    channel_id=ctx.channel.id,
-                    database_id=database_id,
-                    interval=interval,
-                    display_columns=json.dumps(selected_columns),
-                    is_active=True
-                )
-                monitor.last_checked = datetime.utcnow().isoformat() + "Z"
-                self.db.add(monitor)
+            # 更新配置
+            monitor.database_id = database_id
+            monitor.interval = interval
+            monitor.display_columns = json.dumps(selected_columns)
+            monitor.is_active = True
+            monitor.last_checked = datetime.utcnow().isoformat() + "Z"
             
             self.db.commit()
 
             # 创建初始快照
             await ctx.send("正在创建数据库快照，这可能需要一些时间...")
-            await self.create_initial_snapshots(guild_info, monitor)
+            await self.create_initial_snapshots(monitor)
 
             embed = discord.Embed(
                 title="监控设置完成",
@@ -746,12 +736,11 @@ class NotionMonitor(commands.Cog):
             traceback.print_exc()
             await ctx.send(f"设置失败: {str(e)}")
 
-    async def get_database_structure(self, guild_id, database_id):
-        """获取数据库的列结构"""
-        guild_info = self.bot.guild_info[str(guild_id)]
+    async def get_database_structure_with_key(self, notion_api_key, database_id):
+        """使用指定的API密钥获取数据库结构"""
         url = f"https://api.notion.com/v1/databases/{database_id}"
         headers = {
-            'Authorization': guild_info.notion_api_key,
+            'Authorization': notion_api_key,
             'Notion-Version': '2021-08-16'
         }
         
@@ -941,7 +930,7 @@ class NotionMonitor(commands.Cog):
             for user in users_data:
                 user_id = user.get("id")
                 if not user_id:
-                    print(f"跳过无效用户数据: {json.dumps(user, indent=2)}")
+                    print(f"跳过无效用户数: {json.dumps(user, indent=2)}")
                     continue
                     
                 discord_mention = user_mappings.get(user_id)
@@ -961,14 +950,14 @@ class NotionMonitor(commands.Cog):
             print(f"用户数据: {json.dumps(users_data, indent=2)}")
             return None
 
-    async def create_initial_snapshots(self, guild_info, monitor):
+    async def create_initial_snapshots(self, monitor):
         """为数据库中的所有面创建初始快照"""
         try:
             print(f"正在为数据库 {monitor.database_id} 创建初始快照...")
             
             url = "https://api.notion.com/v1/databases/" + monitor.database_id + "/query"
             headers = {
-                'Authorization': guild_info.notion_api_key,
+                'Authorization': monitor.notion_api_key,
                 'Notion-Version': '2021-08-16',
                 'Content-Type': 'application/json'
             }

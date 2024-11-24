@@ -4,41 +4,49 @@ import requests
 from database import SessionLocal, engine
 import models
 from functionality.security import *
+import os
 
 db = SessionLocal()
 
-# TODO: Use discord component buttons to make this more user friendly
+try:
+    PREFIX = os.environ["PREFIX"]
+except:
+    PREFIX = "*"
 
-
-async def verifyDetails(notion_api_key, notion_db_id, ctx):
-    url = "https://api.notion.com/v1/databases/" + notion_db_id
+async def verifyDetails(notion_api_key, ctx):
+    """验证API密钥是否有效"""
     headers = {
         "Authorization": notion_api_key,
         "Notion-Version": "2021-05-13",
         "Content-Type": "application/json",
     }
+    # 尝试获取用户信息来验证API密钥
+    url = "https://api.notion.com/v1/users/me"
     res = requests.get(url, headers=headers)
     if res.status_code != 200:
         res = res.json()
         if res["code"] == "unauthorized":
-            await ctx.send("Invalid Notion API key")
-            return False
-        elif res["code"] == "object_not_found":
-            await ctx.send("Invalid Notion database id")
+            await ctx.send("无效的Notion API密钥")
             return False
         else:
             print(res)
             return False
-    else:
-        return True
-
+    return True
 
 async def setupConversation(ctx, bot):
     """
-    获取Notion API密钥并设置
+    设置频道的Notion API密钥
     """
     guild_id = ctx.guild.id
-    embed = discord.Embed(description="请输入Notion API密钥")
+    channel_id = ctx.channel.id
+
+    # 检查是否已经设置过
+    monitor = db.query(models.NotionMonitorConfig).filter_by(
+        guild_id=guild_id,
+        channel_id=channel_id
+    ).first()
+
+    embed = discord.Embed(description="请输入此频道使用的Notion API密钥")
     await ctx.send(embed=embed)
     try:
         msg = await bot.wait_for(
@@ -66,35 +74,37 @@ async def setupConversation(ctx, bot):
         await ctx.send(embed=embed)
         return None
 
-    # 如果guild已存在，更新它
-    client = db.query(models.Clients).filter(models.Clients.guild_id == guild_id).first()
-    if client:
-        client.notion_api_key = encrypt(notion_api_key)
+    # 验证API密钥是否有效
+    if not await verifyDetails(notion_api_key, ctx):
+        return None
+
+    # 如果已存在配置，更新它
+    if monitor:
+        monitor.notion_api_key = notion_api_key
         db.commit()
         embed = discord.Embed(
             title="更新成功",
-            description="设置已更新",
+            description=f"已更新频道 {ctx.channel.mention} 的API密钥",
+            color=discord.Color.green(),
+        )
+        await ctx.send(embed=embed)
+    else:
+        # 创建新配置
+        monitor = models.NotionMonitorConfig(
+            guild_id=guild_id,
+            channel_id=channel_id,
+            notion_api_key=notion_api_key,
+            database_id="",  # 空数据库ID，等待ms命令设置
+            is_active=False  # 默认不激活，需要使用ms命令设置
+        )
+        db.add(monitor)
+        db.commit()
+        embed = discord.Embed(
+            title="设置成功",
+            description=f"已为频道 {ctx.channel.mention} 设置Notion API密钥\n"
+                       f"请使用 `{PREFIX}ms` 命令设置要监控的数据库",
             color=discord.Color.green(),
         )
         await ctx.send(embed=embed)
 
-        # 创建返回对象
-        obj = models.Clients(
-            guild_id=guild_id,
-            notion_api_key=notion_api_key,
-        )
-        return obj
-
-    # 如果是新guild，创建新记录
-    new_client = models.Clients(
-        guild_id=guild_id,
-        notion_api_key=encrypt(notion_api_key),
-    )
-
-    obj = models.Clients(
-        guild_id=guild_id,
-        notion_api_key=notion_api_key,
-    )
-    db.add(new_client)
-    db.commit()
-    return obj
+    return monitor

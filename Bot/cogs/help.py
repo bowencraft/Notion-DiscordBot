@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
-from functionality.utils import *
+from database import SessionLocal
+import models
 import os
 
 try:
@@ -11,26 +12,28 @@ except:
 class Help(commands.Cog):
     def __init__(self, client):
         self.bot = client
-        self.guild_data = self.bot.guild_info
+        self.db = SessionLocal()
 
     @commands.command(name="help", aliases=["h"])
     async def help(self, ctx, *args):
-        """Give commands list"""
-        # check if guild is present
-        if not checkIfGuildPresent(ctx.guild.id):
-            # embed send
+        """显示命令列表"""
+        # 检查频道是否已设置
+        monitor = self.db.query(models.NotionMonitorConfig).filter_by(
+            guild_id=ctx.guild.id,
+            channel_id=ctx.channel.id
+        ).first()
+        
+        if not monitor:
             embed = discord.Embed(
-                description="You are not registered, please run `" + PREFIX + "setup` first",
-                title="",
+                description=f"请先运行 `{PREFIX}setup` 设置此频道",
                 color=discord.Color.red(),
             )
             await ctx.send(embed=embed)
             return
         
-        guild = self.guild_data[str(ctx.guild.id)]
-        prefix = guild.prefix
+        prefix = monitor.prefix
         commands = {
-            f"```{prefix}setup```": "设置Notion API密钥",
+            f"```{prefix}setup```": "设置Notion API密钥和数据库",
             f"```{prefix}prefix```": "更改机器人的命令前缀",
             f"```{prefix}monitor_setup (或 ms)```": "设置新的Notion数据库监控",
             f"```{prefix}monitor_start (或 mstart)```": "启动当前频道的监控",
