@@ -35,11 +35,10 @@ async def verifyDetails(notion_api_key, notion_db_id, ctx):
 
 async def setupConversation(ctx, bot):
     """
-    Get all the data from client, verify it and add it to the database
+    获取Notion API密钥并设置
     """
-
     guild_id = ctx.guild.id
-    embed = discord.Embed(description="Enter the notion API key")
+    embed = discord.Embed(description="请输入Notion API密钥")
     await ctx.send(embed=embed)
     try:
         msg = await bot.wait_for(
@@ -49,124 +48,53 @@ async def setupConversation(ctx, bot):
         )
     except asyncio.TimeoutError:
         embed = discord.Embed(
-            title="Timed out",
-            description="You took too long to respond",
+            title="超时",
+            description="设置超时，请重新开始",
             color=discord.Color.red(),
         )
         await ctx.send(embed=embed)
         return
     notion_api_key = msg.content.strip()
 
-    embed = discord.Embed(description="Enter the notion database id")
-    await ctx.send(embed=embed)
-    try:
-        msg = await bot.wait_for(
-            "message", check=lambda message: message.author == ctx.author, timeout=60
-        )
-    except asyncio.TimeoutError:
-        embed = discord.Embed(
-            title="Timed out",
-            description="You took too long to respond",
-            color=discord.Color.red(),
-        )
-        await ctx.send(embed=embed)
-        return
-    notion_db_id = msg.content.strip()
-
-    embed = discord.Embed(description="Do you want to enable tagging? (y/n)")
-    await ctx.send(embed=embed)
-    try:
-        msg = await bot.wait_for(
-            "message", check=lambda message: message.author == ctx.author, timeout=60
-        )
-    except asyncio.TimeoutError:
-        embed = discord.Embed(
-            title="Timed out",
-            description="You took too long to respond",
-            color=discord.Color.red(),
-        )
-        await ctx.send(embed=embed)
-        return
-    if msg.content.lower().strip() == "y":
-        tag = True
-    else:
-        tag = False
-
-    embed = discord.Embed(description="请提及(mention)一个用于接收Notion更新通知的频道")
-    await ctx.send(embed=embed)
-    try:
-        msg = await bot.wait_for(
-            "message", check=lambda message: message.author == ctx.author, timeout=60
-        )
-    except asyncio.TimeoutError:
-        embed = discord.Embed(
-            title="Timed out",
-            description="You took too long to respond",
-            color=discord.Color.red(),
-        )
-        await ctx.send(embed=embed)
-        return
-
-    # 检查是否提及了频道
-    if len(msg.channel_mentions) == 0:
+    # 验证API密钥
+    if not notion_api_key.startswith('secret_'):
         embed = discord.Embed(
             title="错误",
-            description="请提及一个有效的频道（使用#提及频道）",
+            description="无效的Notion API密钥",
             color=discord.Color.red(),
         )
         await ctx.send(embed=embed)
-        return
-    
-    notion_channel = msg.channel_mentions[0].id
+        return None
 
-    # Verify the details
-    verification = await verifyDetails(notion_api_key, notion_db_id, ctx)
-    if verification:
-        # If guild already exists, update it
-        client = (
-            db.query(models.Clients).filter(models.Clients.guild_id == guild_id).first()
+    # 如果guild已存在，更新它
+    client = db.query(models.Clients).filter(models.Clients.guild_id == guild_id).first()
+    if client:
+        client.notion_api_key = encrypt(notion_api_key)
+        db.commit()
+        embed = discord.Embed(
+            title="更新成功",
+            description="设置已更新",
+            color=discord.Color.green(),
         )
-        if client:
-            client.notion_api_key = encrypt(notion_api_key)
-            client.notion_db_id = encrypt(notion_db_id)
-            client.tag = tag
-            client.notion_channel = notion_channel
-            db.commit()
-            embed = discord.Embed(
-                title="Updated",
-                description="The client has been updated",
-                color=discord.Color.green(),
-            )
-            await ctx.send(embed=embed)
+        await ctx.send(embed=embed)
 
-            # create obj
-            obj = models.Clients(
-                guild_id=guild_id,
-                notion_api_key=notion_api_key,
-                notion_db_id=notion_db_id,
-                tag=tag,
-                notion_channel=notion_channel
-            )
-            return obj
-
-        # If the details are correct, add them to the database
-        new_client = models.Clients(
-            guild_id=guild_id,
-            notion_api_key=encrypt(notion_api_key),
-            notion_db_id=encrypt(notion_db_id),
-            tag=tag,
-            notion_channel=notion_channel
-        )
-
+        # 创建返回对象
         obj = models.Clients(
             guild_id=guild_id,
             notion_api_key=notion_api_key,
-            notion_db_id=notion_db_id,
-            tag=tag,
-            notion_channel=notion_channel
         )
-        db.add(new_client)
-        db.commit()
         return obj
 
-    return None
+    # 如果是新guild，创建新记录
+    new_client = models.Clients(
+        guild_id=guild_id,
+        notion_api_key=encrypt(notion_api_key),
+    )
+
+    obj = models.Clients(
+        guild_id=guild_id,
+        notion_api_key=notion_api_key,
+    )
+    db.add(new_client)
+    db.commit()
+    return obj

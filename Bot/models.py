@@ -1,6 +1,5 @@
 import os
 from sqlalchemy import Column, Integer, String
-from sqlalchemy.sql.expression import null
 from sqlalchemy.sql.sqltypes import Boolean
 from database import Base
 
@@ -14,28 +13,19 @@ class Clients(Base):
     id = Column(Integer, primary_key=True, index=True)
     guild_id = Column(Integer, index=True, nullable=False)
     notion_api_key = Column(String, nullable=False)
-    notion_db_id = Column(String, nullable=False)
-    tag = Column(Boolean, default=False)
     prefix = Column(String, default=PREFIX)
-    notion_channel = Column(Integer, nullable=True)
 
-    def __init__(self, guild_id, notion_api_key, notion_db_id, tag, prefix=PREFIX, notion_channel=None):
+    def __init__(self, guild_id, notion_api_key, prefix=PREFIX):
         self.guild_id = guild_id
         self.notion_api_key = notion_api_key
-        self.notion_db_id = notion_db_id
-        self.tag = tag
         self.prefix = prefix
-        self.notion_channel = notion_channel
 
     @property
     def serialize(self):
         return {
             "guild_id": self.guild_id,
             "notion_api_key": self.notion_api_key,
-            "notion_db_id": self.notion_db_id,
-            "tag": self.tag,
             "prefix": self.prefix,
-            "notion_channel": self.notion_channel,
         }
 
 class NotionMonitorConfig(Base):
@@ -48,7 +38,6 @@ class NotionMonitorConfig(Base):
     display_columns = Column(String, nullable=False)  # JSON格式存储要显示的列
     is_active = Column(Boolean, default=False)
     last_checked = Column(String, nullable=True)
-    embed_color = Column(String, default='blue')  # 添加颜色设置
 
     def __init__(self, guild_id, channel_id, database_id, interval=2, display_columns="[]", is_active=False):
         self.guild_id = guild_id
@@ -58,7 +47,6 @@ class NotionMonitorConfig(Base):
         self.display_columns = display_columns
         self.is_active = is_active
         self.last_checked = None
-        self.embed_color = 'blue'
 
 class NotionPageSnapshot(Base):
     __tablename__ = 'notion_page_snapshots'

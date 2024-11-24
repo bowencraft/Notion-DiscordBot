@@ -29,41 +29,16 @@ class Help(commands.Cog):
         
         guild = self.guild_data[str(ctx.guild.id)]
         prefix = guild.prefix
-        commands = {}
-        if guild.tag:
-            # check if the guild has tags enabled
-            commands = {
-                f"```{prefix}add <URL> <Tag 1> <Tag2>...<TagN>```": "添加URL到数据库并设置标签",
-                f"```{prefix}search <Tag 1> <Tag2>...<TagN>```": "搜索包含指定标签的记录",
-                f"```{prefix}searchTitle <Title>```": "按标题搜索记录",
-                f"```{prefix}delete <Tag1> <Tag2>....<TagN>```": "删除包含指定标签的记录",
-                f"```{prefix}deleteTitle <Title>```": "按标题删除记录",
-                f"```{prefix}upload <Tag 1> <Tag2>...<TagN>```": "上传文件到Notion数据库并设置标签",
-                f"```{prefix}prefix```": "更改机器人的命令前缀",
-                # 更新监控相关命令的说明
-                f"```{prefix}monitor_setup (或 ms)```": "设置新的Notion数据库监控",
-                f"```{prefix}monitor_start (或 mstart)```": "启动当前频道的监控",
-                f"```{prefix}monitor_stop (或 mstop)```": "停止当前频道的监控",
-                f"```{prefix}notion_monitor (或 nm)```": "立即执行一次更新检查",
-                f"```{prefix}monitor_config (或 mc)```": "查看当前监控配置",
-                f"```{prefix}mc interval <分钟>```": "设置检查间隔时间"
-            }
-        else:
-            # no tags enabled
-            commands = {
-                f"```{prefix}add <URL>```": "添加URL到数据库",
-                f"```{prefix}search <Title>```": "按标题搜索记录",
-                f"```{prefix}delete <Title>```": "按标题删除记录",
-                f"```{prefix}upload```": "上传文件到Notion数据库",
-                f"```{prefix}prefix```": "更改机器人的命令前缀",
-                # 更新监控相关命令的说明
-                f"```{prefix}monitor_setup (或 ms)```": "设置新的Notion数据库监控",
-                f"```{prefix}monitor_start (或 mstart)```": "启动当前频道的监控",
-                f"```{prefix}monitor_stop (或 mstop)```": "停止当前频道的监控",
-                f"```{prefix}notion_monitor (或 nm)```": "立即执行一次更新检查",
-                f"```{prefix}monitor_config (或 mc)```": "查看当前监控配置",
-                f"```{prefix}mc interval <分钟>```": "设置检查间隔时间"
-            }
+        commands = {
+            f"```{prefix}setup```": "设置Notion API密钥",
+            f"```{prefix}prefix```": "更改机器人的命令前缀",
+            f"```{prefix}monitor_setup (或 ms)```": "设置新的Notion数据库监控",
+            f"```{prefix}monitor_start (或 mstart)```": "启动当前频道的监控",
+            f"```{prefix}monitor_stop (或 mstop)```": "停止当前频道的监控",
+            f"```{prefix}notion_monitor (或 nm)```": "立即执行一次更新检查",
+            f"```{prefix}monitor_config (或 mc)```": "查看当前监控配置",
+            f"```{prefix}mc interval <分钟>```": "设置检查间隔时间"
+        }
 
         embed = discord.Embed(
             title="命令列表:", 

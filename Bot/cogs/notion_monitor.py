@@ -373,19 +373,24 @@ class NotionMonitor(commands.Cog):
             if not property_type:
                 return None
                 
-            if property_type == "title" or property_type == "rich_text":
-                text_list = property_data.get(property_type, [])
+            if property_type == "title":
+                text_list = property_data.get("title", [])
                 if text_list and len(text_list) > 0:
-                    return text_list[0]["text"]["content"]
+                    return text_list[0].get("plain_text", "")
+                    
+            elif property_type == "rich_text":
+                text_list = property_data.get("rich_text", [])
+                if text_list and len(text_list) > 0:
+                    return text_list[0].get("plain_text", "")
                     
             elif property_type == "select":
                 select_data = property_data.get("select")
                 if select_data:
-                    return select_data.get("name")
+                    return select_data.get("name", "")
                     
             elif property_type == "multi_select":
                 multi_select = property_data.get("multi_select", [])
-                return ", ".join([item["name"] for item in multi_select if "name" in item])
+                return ", ".join([item.get("name", "") for item in multi_select])
                 
             elif property_type == "date":
                 date_data = property_data.get("date")
@@ -426,13 +431,20 @@ class NotionMonitor(commands.Cog):
             elif property_type == "formula":
                 formula = property_data.get("formula", {})
                 return str(formula.get("string") or formula.get("number") or 
-                         formula.get("boolean") or formula.get("date"))
+                         formula.get("boolean") or formula.get("date", ""))
+                
+            elif property_type == "created_time":
+                return property_data.get("created_time", "")
+                
+            elif property_type == "last_edited_time":
+                return property_data.get("last_edited_time", "")
                 
             return str(property_data.get(property_type, ""))
             
         except Exception as e:
             print(f"格式化属性值时出错: {e}")
-            return None
+            print(f"属性数据: {json.dumps(property_data, indent=2)}")  # 添加详细的错误日志
+            return "格式化错误"
 
     def format_default_message(self, page, embed):
         """使用默认格式创建消息"""
@@ -546,7 +558,7 @@ class NotionMonitor(commands.Cog):
                         else:
                             await ctx.send(f"编号 {num} 超出范围，已忽略")
                     except ValueError:
-                        await ctx.send(f"���效的编号 '{num}'，已忽略")
+                        await ctx.send(f"效的编号 '{num}'，已忽略")
                 
                 if not selected_columns:
                     await ctx.send("未选择任何有效的列，请重新设置")
