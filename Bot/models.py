@@ -20,8 +20,9 @@ class NotionMonitorConfig(Base):
     is_active = Column(Boolean, default=False)
     last_checked = Column(String, nullable=True)
     prefix = Column(String, default=PREFIX)
+    title_column = Column(String, nullable=True)
 
-    def __init__(self, guild_id, channel_id, notion_api_key, database_id, interval=2, display_columns="[]", is_active=False, prefix=PREFIX):
+    def __init__(self, guild_id, channel_id, notion_api_key, database_id, interval=2, display_columns="[]", is_active=False, prefix=PREFIX, title_column=None):
         self.guild_id = guild_id
         self.channel_id = channel_id
         self.notion_api_key = notion_api_key
@@ -31,6 +32,7 @@ class NotionMonitorConfig(Base):
         self.is_active = is_active
         self.last_checked = None
         self.prefix = prefix
+        self.title_column = title_column
 
 class NotionPageSnapshot(Base):
     __tablename__ = 'notion_page_snapshots'

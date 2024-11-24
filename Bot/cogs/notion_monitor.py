@@ -65,8 +65,8 @@ class NotionMonitor(commands.Cog):
 
     @commands.command(name="monitor_config", aliases=["mc"])
     @commands.has_permissions(administrator=True)
-    async def configure_monitor(self, ctx, setting: str = None, value: str = None):
-        """配置监控的显示设置"""
+    async def configure_monitor(self, ctx, setting: str = None, *, value: str = None):
+        """配置监控的设置"""
         monitor = self.db.query(models.NotionMonitorConfig).filter_by(
             guild_id=ctx.guild.id,
             channel_id=ctx.channel.id
@@ -78,37 +78,66 @@ class NotionMonitor(commands.Cog):
 
         if setting is None:
             # 显示当前配置
+            current_title = monitor.title_column or "默认"
             embed = discord.Embed(
                 title="当前监控配置",
                 description=f"数据库ID: {monitor.database_id}\n"
                            f"检查间隔: {monitor.interval}分钟\n"
                            f"显示列: {monitor.display_columns}\n"
+                           f"标题来源: {current_title}\n"
                            f"状态: {'活跃' if monitor.is_active else '停止'}",
                 color=discord.Color.blue()
             )
             await ctx.send(embed=embed)
             return
 
-        if setting.lower() != 'interval':
-            await ctx.send("无效的设置选项。只支持设置 interval（检查间隔）")
+        setting = setting.lower()
+        if setting == 'interval':
+            try:
+                interval = int(value)
+                if interval < 1:
+                    await ctx.send("间隔时间必须大于0分钟")
+                    return
+                monitor.interval = interval
+                self.db.commit()
+                await ctx.send(f"已将检查间隔设置为 {interval} 分钟")
+            except ValueError:
+                await ctx.send("请输入有效的数字")
             return
 
-        if value is None:
-            await ctx.send("请提供间隔时间（分钟）")
-            return
-
-        try:
-            interval = int(value)
-            if interval < 1:
-                await ctx.send("间隔时间必须大于0分钟")
+        elif setting == 'task_name':
+            if value is None:
+                current_title = monitor.title_column or "默认"
+                embed = discord.Embed(
+                    title="通知标题设置",
+                    description=f"当前标题来源: {current_title}\n\n"
+                               f"使用 `{monitor.prefix}mc task_name <列名>` 设置标题来源\n"
+                               f"使用 `{monitor.prefix}mc task_name default` 恢复默认标题",
+                    color=discord.Color.blue()
+                )
+                await ctx.send(embed=embed)
                 return
-            monitor.interval = interval
+
+            if value.lower() == "default":
+                monitor.title_column = None
+                self.db.commit()
+                await ctx.send("✅ 已恢复默认标题")
+                return
+
+            # 验证列名是否存在
+            db_structure = await self.get_database_structure_with_key(monitor.notion_api_key, monitor.database_id)
+            if not db_structure or value not in db_structure:
+                await ctx.send(f"❌ 列名 '{value}' 不存在\n可用的列: {', '.join(db_structure.keys())}")
+                return
+
+            monitor.title_column = value
             self.db.commit()
-            await ctx.send(f"已将检查间隔设置为 {interval} 分钟")
-        except ValueError:
-            await ctx.send("请输入有效的数字")
-        except Exception as e:
-            await ctx.send(f"设置失败: {str(e)}")
+            await ctx.send(f"✅ 已设置标题来源为: {value}")
+            return
+
+        await ctx.send("无效的设置选项。可用选项:\n"
+                      "- interval: 设置检查间隔（分钟）\n"
+                      "- task_name: 设置通知标题来源")
 
     @commands.command(name="set_notion_channel", aliases=["snc"])
     @commands.has_permissions(administrator=True)
@@ -192,7 +221,7 @@ class NotionMonitor(commands.Cog):
                     # 删除的属性
                     old_value = await self.format_property_value(old_props[prop_name], guild_id)
                     if old_value:
-                        changes.append(f"**删除 {prop_name}**: {old_value}")
+                        changes.append(f"**删 {prop_name}**: {old_value}")
                         
         except Exception as e:
             print(f"比较页面变化时出错: {e}")
@@ -228,8 +257,29 @@ class NotionMonitor(commands.Cog):
                             embed_color = self.notion_color_to_discord(color)
                             break
 
+            # 获取标题
+            if page.get("is_new", False):
+                base_title = "📝 Notion 新工单"
+            else:
+                base_title = "📝 Notion 工单更新"
+
+            title = base_title
+            if guild_id:
+                monitor = self.db.query(models.NotionMonitorConfig).filter_by(
+                    guild_id=guild_id,
+                    channel_id=self.channel_id
+                ).first()
+                if monitor and monitor.title_column:
+                    if monitor.title_column in page["properties"]:
+                        custom_title = await self.format_property_value(
+                            page["properties"][monitor.title_column],
+                            guild_id
+                        )
+                        if custom_title:
+                            title = f"{base_title}：{custom_title}"
+
             embed = discord.Embed(
-                title="📝 Notion更新通知",
+                title=title,
                 color=embed_color,
                 timestamp=datetime.utcnow()
             )
@@ -866,7 +916,7 @@ class NotionMonitor(commands.Cog):
             
             if not monitor:
                 embed = discord.Embed(
-                    description=f"请先运行 `{PREFIX}setup` 设置此频道",
+                    description=f"请先运行 `{PREFIX}setup` 设此频道",
                     color=discord.Color.red()
                 )
                 await ctx.send(embed=embed)
@@ -1075,6 +1125,48 @@ class NotionMonitor(commands.Cog):
             "default": discord.Color.blue()
         }
         return color_map.get(notion_color, color_map["default"])
+
+    @commands.command(name="set_title", aliases=["st"])
+    @commands.has_permissions(administrator=True)
+    async def set_title(self, ctx, *, column_name: str = None):
+        """设置通知标题使用的数据列"""
+        monitor = self.db.query(models.NotionMonitorConfig).filter_by(
+            guild_id=ctx.guild.id,
+            channel_id=ctx.channel.id
+        ).first()
+        
+        if not monitor:
+            await ctx.send("此频道未设置监控，请先使用 monitor_setup 命令设置")
+            return
+
+        if column_name is None:
+            # 显示当前设置
+            current_title = monitor.title_column or "默认"
+            embed = discord.Embed(
+                title="通知标题设置",
+                description=f"当前标题来源: {current_title}\n\n"
+                           f"使用 `{monitor.prefix}st <列名>` 设置标题来源\n"
+                           f"使用 `{monitor.prefix}st default` 恢复默认标题",
+                color=discord.Color.blue()
+            )
+            await ctx.send(embed=embed)
+            return
+
+        if column_name.lower() == "default":
+            monitor.title_column = None
+            self.db.commit()
+            await ctx.send("✅ 已恢复默认标题")
+            return
+
+        # 验证列名是否存在
+        db_structure = await self.get_database_structure_with_key(monitor.notion_api_key, monitor.database_id)
+        if not db_structure or column_name not in db_structure:
+            await ctx.send(f"❌ 列名 '{column_name}' 不存在\n可用的列: {', '.join(db_structure.keys())}")
+            return
+
+        monitor.title_column = column_name
+        self.db.commit()
+        await ctx.send(f"✅ 已设置标题来源为: {column_name}")
 
 def setup(bot):
     bot.add_cog(NotionMonitor(bot)) 
